@@ -9,6 +9,7 @@ export interface Config {
   horizonUrl?: string;
   rateLimitWindowMs: number;
   rateLimitMax: number;
+  allowedOrigins: string[];
 }
 
 export function loadConfig(): Config {
@@ -32,6 +33,12 @@ export function loadConfig(): Config {
     10
   );
   const rateLimitMax = parseInt(process.env.FLUID_RATE_LIMIT_MAX || "5", 10);
+  // Parse allowed origins from comma-separated environment variable
+  const allowedOriginsEnv = process.env.ALLOWED_ORIGINS || "";
+  const allowedOrigins = allowedOriginsEnv
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 
   return {
     feePayerSecret,
@@ -42,5 +49,6 @@ export function loadConfig(): Config {
     horizonUrl,
     rateLimitWindowMs,
     rateLimitMax,
+    allowedOrigins,
   };
 }

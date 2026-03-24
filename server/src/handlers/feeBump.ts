@@ -3,11 +3,7 @@ import StellarSdk from "@stellar/stellar-sdk";
 import { Config } from "../config";
 import { AppError } from "../errors/AppError";
 
-interface FeeBumpRequest {
-  xdr: string;
-  submit?: boolean;
-  token?: string;
-}
+import { FeeBumpSchema, FeeBumpRequest } from "../schemas/feeBump";
 
 interface FeeBumpResponse {
   xdr: string;
@@ -22,13 +18,23 @@ export function feeBumpHandler(
   config: Config
 ): void {
   try {
-    const body: FeeBumpRequest = req.body;
+    const result = FeeBumpSchema.safeParse(req.body);
 
-    if (!body.xdr) {
+    if (!result.success) {
+      console.warn(
+        "Validation failed for fee-bump request:",
+        result.error.format()
+      );
       return next(
-        new AppError("Missing 'xdr' field in request body", 400, "MISSING_XDR")
+        new AppError(
+          `Validation failed: ${JSON.stringify(result.error.format())}`,
+          400,
+          "INVALID_XDR"
+        )
       );
     }
+
+    const body: FeeBumpRequest = result.data;
 
     console.log("Received fee-bump request");
 

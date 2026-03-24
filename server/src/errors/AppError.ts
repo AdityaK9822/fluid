@@ -5,6 +5,7 @@ export type ErrorCode =
     | "ALREADY_FEE_BUMPED"
     | "SUBMISSION_FAILED"
     | "NOT_FOUND"
+    | "AUTH_FAILED"
     | "INTERNAL_ERROR";
 
 export class AppError extends Error {
