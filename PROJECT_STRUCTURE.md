@@ -1,48 +1,41 @@
 # Project Structure
 
-```
+```text
 fluid/
-├── server/              # Fluid server (TypeScript/Node.js)
-│   ├── src/
-│   │   ├── index.ts     # Main server entry point
-│   │   ├── config.ts    # Configuration management
-│   │   └── handlers/
-│   │       └── feeBump.ts  # Fee-bump request handler
-│   ├── dist/            # Compiled JavaScript (generated)
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── README.md
-│
-├── client/              # Fluid client library (TypeScript)
-│   ├── src/
-│   │   └── index.ts     # Client SDK
-│   ├── dist/            # Compiled JavaScript (generated)
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── README.md
-│
-├── fluid-server/        # Rust server and WASM transaction signer
-│   ├── src/
-│   │   ├── main.rs      # Axum health-check server entry point
-│   │   └── lib.rs       # Stellar transaction signing library + WASM exports
-│   ├── wasm-demo/       # Node/browser validation harness for the WASM build
-│   ├── Cargo.toml
-│   └── Makefile
-│
-├── .gitignore          # Git ignore rules
-├── README.md           # Main project documentation
-└── PROJECT_STRUCTURE.md # This file
+|-- fluid-server/         # Primary Rust production server
+|   |-- src/
+|   |   |-- main.rs       # Axum server entry point
+|   |   |-- stellar.rs    # Fee-bump construction/signing
+|   |   |-- state.rs      # Shared runtime state and failover/rate-limit helpers
+|   |   |-- config.rs     # Environment mapping
+|   |   |-- error.rs      # API error responses
+|   |   `-- xdr.rs        # Stellar XDR parsing/logging
+|   |-- tests/
+|   |   `-- rust_only_verification.rs
+|   `-- Cargo.toml
+|-- server/               # Legacy Node.js parity server and migration harness
+|   |-- src/
+|   |-- scripts/
+|   |-- package.json
+|   `-- README.md
+|-- client/               # TypeScript client SDK
+|   |-- src/
+|   |-- package.json
+|   `-- README.md
+|-- MIGRATION_GUIDE.md    # Rust migration and cutover guide
+|-- README.md             # Main project documentation
+`-- PROJECT_STRUCTURE.md  # This file
 ```
 
 ## Who Submits the Final Transaction?
 
-**By default**: The **client** submits the fee-bump transaction after receiving it from the server.
+By default, the client submits the fee-bump transaction after receiving it from the server.
 
-**Optional**: Set `submit: true` in the request to have the **server** submit it directly (requires `STELLAR_HORIZON_URL` to be configured).
+If `submit: true` is set, the server can submit it directly when Horizon URLs are configured.
 
 ## Technology Stack
 
-- **Server**: Node.js + TypeScript + Express
-- **Rust/WASM**: Axum + wasm-bindgen + stellar-xdr
-- **Client**: Node.js + TypeScript
-- **Stellar SDK**: @stellar/stellar-sdk (JavaScript/TypeScript)
+- Server: Rust + Axum
+- Legacy parity server: Node.js + TypeScript + Express
+- Client: Node.js + TypeScript
+- Stellar tooling: `stellar-xdr`, `ed25519-dalek`, `@stellar/stellar-sdk`
