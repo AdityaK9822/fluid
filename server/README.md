@@ -117,6 +117,7 @@ That request still goes through because the limit is tracked separately per API 
 - Express.js - HTTP server framework
 - TypeScript - Type-safe code
 - @stellar/stellar-sdk - Stellar SDK for transaction handling
+- Rust + `ed25519-dalek` - Non-blocking fee-payer signature generation through a native N-API module
 
 ## Development
 
@@ -126,6 +127,17 @@ npm run build
 npm start
 npm run watch
 ```
+
+## Signing Benchmark
+
+Run the benchmark locally with:
+
+```bash
+npm run benchmark:signing
+```
+
+That command builds the Rust signer, compares it against the current Node.js signing path, and writes the report to `server/benchmarks/signing-report.md`.
+The GitHub Actions benchmark workflow also writes the same report back to the feature branch after a successful run.
 
 ## Project Structure
 

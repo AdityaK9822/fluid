@@ -9,7 +9,6 @@ import { checkTenantDailyQuota } from "../services/quota";
 import { transactionStore } from "../workers/transactionStore";
 import { AppError } from "../errors/AppError";
 
-import { FeeBumpSchema, FeeBumpRequest } from "../schemas/feeBump";
 import { calculateFeeBumpFee } from "../utils/feeCalculator";
 interface FeeBumpRequest {
   xdr: string;
@@ -24,12 +23,12 @@ interface FeeBumpResponse {
   fee_payer: string;
 }
 
-export function feeBumpHandler(
+export async function feeBumpHandler(
   req: Request,
   res: Response,
   next: NextFunction,
   config: Config
-): void {
+): Promise<void> {
   try {
     const result = FeeBumpSchema.safeParse(req.body);
 
@@ -177,6 +176,7 @@ export function feeBumpHandler(
             )
           );
         });
+      }
     } else {
       const response: FeeBumpResponse = {
         xdr: feeBumpXdr,
