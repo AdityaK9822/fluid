@@ -9,6 +9,7 @@
     "native:build": "napi build --release",
     "native:build:debug": "napi build",
     "benchmark:signing": "npm run native:build && ts-node src/benchmarks/signing.ts",
+    "parity:rust": "npm run native:build && powershell -NoProfile -Command \"Get-Process fluid-server -ErrorAction SilentlyContinue | Stop-Process -Force; exit 0\" && cargo build -q --manifest-path ..\\fluid-server\\Cargo.toml && ts-node scripts/parityCheck.ts",
     "test:signer-pool": "npm run native:build && node --test -r ts-node/register src/signing/signerPool.test.ts",
     "demo:horizon-failover": "node scripts/horizonFailoverDemo.mjs",
     "start": "node dist/index.js",
