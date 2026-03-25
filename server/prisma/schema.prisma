@@ -1,0 +1,18 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Initial models for multi-tenancy and logging
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  apiKey    String   @unique
+  createdAt DateTime @default(now())
+}
