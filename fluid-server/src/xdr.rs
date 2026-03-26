@@ -18,6 +18,12 @@ pub enum ParsedTransaction {
     FeeBump(Box<FeeBumpTransaction>),
 }
 
+#[derive(Debug, Clone)]
+pub struct TransactionSummary {
+    pub sequence_number: i64,
+    pub transaction_type: &'static str,
+}
+
 /// Errors produced by [`parse_xdr`].
 #[derive(Debug)]
 pub enum XdrError {
@@ -114,6 +120,25 @@ pub fn log_xdr_breakdown(parsed: &ParsedTransaction) {
                 }
             }
         }
+    }
+}
+
+pub fn summarize_transaction(parsed: &ParsedTransaction) -> TransactionSummary {
+    match parsed {
+        ParsedTransaction::V0(tx) => TransactionSummary {
+            sequence_number: tx.seq_num.0,
+            transaction_type: "classic_v0",
+        },
+        ParsedTransaction::V1(tx) => TransactionSummary {
+            sequence_number: tx.seq_num.0,
+            transaction_type: "classic_v1",
+        },
+        ParsedTransaction::FeeBump(tx) => match &tx.inner_tx {
+            FeeBumpTransactionInnerTx::Tx(inner_env) => TransactionSummary {
+                sequence_number: inner_env.tx.seq_num.0,
+                transaction_type: "fee_bump",
+            },
+        },
     }
 }
 

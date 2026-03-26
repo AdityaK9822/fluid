@@ -1,16 +1,13 @@
 mod config;
+mod db;
 mod error;
+mod metrics;
 mod state;
 mod stellar;
-mod db;
 mod xdr;
 
-use axum::{extract::State, routing::get, Json, Router};
-use serde::Serialize;
-use std::net::SocketAddr;
-
 use axum::{
-    extract::{ConnectInfo, Request, State},
+    extract::{ConnectInfo, Extension, Request, State},
     http::{
         header::{self, HeaderMap, HeaderName, HeaderValue},
         Method, Uri,
@@ -20,16 +17,18 @@ use axum::{
     Json, Router,
 };
 use config::load_config;
+use db::create_pool;
 use error::AppError;
 use serde::{Deserialize, Serialize};
+use sqlx::postgres::PgPool;
 use state::{
     iso_now, utc_day_start_ms, ApiKeyConfig, AppState, HealthFeePayer, HorizonNodeStatus,
     RateLimitEntry, RateLimitResult, TransactionRecord, API_KEYS,
 };
+use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tracing::{error, info};
-use std::sync::Arc;
-use tracing::{error, info};
+use xdr::summarize_transaction;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -92,64 +91,54 @@ struct DbVerificationResponse {
     message: String,
 }
 
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
-}
+async fn verify_db(db_pool: Option<Extension<Arc<PgPool>>>) -> Json<DbVerificationResponse> {
+    let Some(Extension(db_pool)) = db_pool else {
+        return Json(DbVerificationResponse {
+            status: "error",
+            message: "Database pool is not configured for this server instance".to_string(),
+        });
+    };
 
-/// Verification endpoint that tests database connectivity and operations
-async fn verify_db(
-    State(db_pool): State<Arc<sqlx::postgres::PgPool>>,
-) -> Json<DbVerificationResponse> {
-    // Test 1: Health check query
     match sqlx::query("SELECT 1").execute(db_pool.as_ref()).await {
-        Ok(_) => {
-            info!("Database health check passed");
-        }
-        Err(e) => {
-            error!("Database health check failed: {}", e);
+        Ok(_) => info!("Database health check passed"),
+        Err(err) => {
+            error!("Database health check failed: {}", err);
             return Json(DbVerificationResponse {
                 status: "error",
-                message: format!("Database health check failed: {}", e),
+                message: format!("Database health check failed: {}", err),
             });
         }
     }
 
-    // Test 2: Attempt to read from Tenant table
     match db::TenantRepo::list_all(db_pool.as_ref()).await {
-        Ok(tenants) => {
-            info!(
-                "Successfully queried Tenant table: {} tenants found",
-                tenants.len()
-            );
-        }
-        Err(e) => {
-            error!("Failed to query Tenant table: {}", e);
+        Ok(tenants) => info!(
+            "Successfully queried Tenant table: {} tenants found",
+            tenants.len()
+        ),
+        Err(err) => {
+            error!("Failed to query Tenant table: {}", err);
             return Json(DbVerificationResponse {
                 status: "error",
-                message: format!("Failed to query Tenant table: {}", e),
+                message: format!("Failed to query Tenant table: {}", err),
             });
         }
     }
 
-    // Test 3: Insert a test transaction
     let test_hash = format!("test_{}", uuid::Uuid::new_v4());
     match db::TransactionRepo::insert(db_pool.as_ref(), &test_hash, "pending").await {
-        Ok(tx) => {
-            info!(
-                "Successfully inserted test transaction: hash={}, status={}",
-                tx.hash, tx.status
-            );
-        }
-        Err(e) => {
-            error!("Failed to insert test transaction: {}", e);
+        Ok(tx) => info!(
+            "Successfully inserted test transaction: hash={}, status={}",
+            tx.hash, tx.status
+        ),
+        Err(err) => {
+            error!("Failed to insert test transaction: {}", err);
             return Json(DbVerificationResponse {
                 status: "error",
-                message: format!("Failed to insert transaction: {}", e),
+                message: format!("Failed to insert transaction: {}", err),
             });
         }
     }
 
-    info!("All database verification tests passed");
     Json(DbVerificationResponse {
         status: "ok",
         message: "Database connectivity and operations verified successfully".to_string(),
@@ -158,7 +147,6 @@ async fn verify_db(
 
 #[tokio::main]
 async fn main() {
-    // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -184,33 +172,29 @@ async fn run() -> Result<(), AppError> {
         .route("/", get(dashboard))
         .route("/dashboard", get(dashboard))
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
+        .route("/verify-db", get(verify_db))
         .route("/fee-bump", post(fee_bump))
         .route("/test/add-transaction", post(add_transaction))
         .route("/test/transactions", get(list_transactions))
         .fallback(not_found)
-        .with_state(state)
-        .layer(build_cors_layer(&allowed_origins));
-    // Initialize database pool
-    let db_pool = match db::create_pool().await {
-        Ok(pool) => Arc::new(pool),
-        Err(e) => {
-            error!("Failed to create database pool: {}", e);
-            std::process::exit(1);
+        .layer(build_cors_layer(&allowed_origins))
+        .with_state(state);
+
+    let app = match create_pool().await {
+        Ok(pool) => {
+            info!("Database pool created successfully");
+            app.layer(Extension(Arc::new(pool)))
+        }
+        Err(error) => {
+            error!("Database pool unavailable, continuing without verify-db support: {error}");
+            app
         }
     };
 
-    let app = Router::new()
-        .route("/health", get(health))
-        .route("/verify-db", get(verify_db))
-        .with_state(db_pool);
-
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(3001);
-
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Fluid server (Rust) listening on {addr}");
+
     let listener = tokio::net::TcpListener::bind(addr).await.map_err(|error| {
         AppError::new(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -219,22 +203,22 @@ async fn run() -> Result<(), AppError> {
         )
     })?;
 
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .map_err(|error| {
-            AppError::new(
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "INTERNAL_ERROR",
-                format!("Rust server exited unexpectedly: {error}"),
-            )
-        })
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(|error| {
+        AppError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_ERROR",
+            format!("Rust server exited unexpectedly: {error}"),
+        )
+    })
 }
 
 fn build_cors_layer(allowed_origins: &[String]) -> CorsLayer {
-    let headers = AllowHeaders::list([
-        header::CONTENT_TYPE,
-        HeaderName::from_static("x-api-key"),
-    ]);
+    let headers = AllowHeaders::list([header::CONTENT_TYPE, HeaderName::from_static("x-api-key")]);
 
     if allowed_origins.is_empty() {
         return CorsLayer::new()
@@ -262,12 +246,40 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     let fee_payers = state.signer_pool.snapshot().await;
     let horizon_nodes = state.horizon.statuses().await;
 
+    let known_balance_sum = fee_payers
+        .iter()
+        .filter_map(|payer| payer.balance.as_deref())
+        .filter_map(|value| value.parse::<f64>().ok())
+        .sum::<f64>();
+    if known_balance_sum > 0.0 {
+        state
+            .metrics
+            .set_available_account_balance(known_balance_sum);
+    }
+
     Json(HealthResponse {
         total: fee_payers.len(),
         fee_payers,
         horizon_nodes,
         status: "ok",
     })
+}
+
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    match state.metrics.render() {
+        Ok(body) => (
+            axum::http::StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+            body,
+        )
+            .into_response(),
+        Err(err) => AppError::new(
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_ERROR",
+            format!("Failed to render metrics: {err}"),
+        )
+        .into_response(),
+    }
 }
 
 async fn add_transaction(
@@ -316,6 +328,30 @@ async fn fee_bump(
     headers: HeaderMap,
     Json(body): Json<FeeBumpRequest>,
 ) -> Result<Response, AppError> {
+    state.metrics.inc_total_transactions();
+    let started_at = Instant::now();
+
+    let result = fee_bump_inner(&state, addr, &headers, body).await;
+
+    state
+        .metrics
+        .observe_signing_latency_ms(started_at.elapsed().as_secs_f64() * 1_000.0);
+
+    if matches!(&result, Err(_))
+        || matches!(&result, Ok(response) if response.status().is_client_error() || response.status().is_server_error())
+    {
+        state.metrics.inc_failed_transactions();
+    }
+
+    result
+}
+
+async fn fee_bump_inner(
+    state: &AppState,
+    addr: SocketAddr,
+    headers: &HeaderMap,
+    body: FeeBumpRequest,
+) -> Result<Response, AppError> {
     if body.xdr.trim().is_empty() {
         return Err(AppError::new(
             axum::http::StatusCode::BAD_REQUEST,
@@ -324,10 +360,13 @@ async fn fee_bump(
         ));
     }
 
-    let api_key = extract_api_key(&headers)?;
+    let api_key = extract_api_key(headers)?;
     let api_key_config = find_api_key(&api_key)?;
-    let ip_limit = state.global_limiter.check(&format!("ip:{}", addr.ip())).await?;
-    let api_limit = check_api_key_rate_limit(&state, &api_key_config).await?;
+    let ip_limit = state
+        .global_limiter
+        .check(&format!("ip:{}", addr.ip()))
+        .await?;
+    let api_limit = check_api_key_rate_limit(state, &api_key_config).await?;
 
     let signer_lease = state.signer_pool.acquire().await?;
     let fee_payer = signer_lease.account.public_key.clone();
@@ -342,6 +381,11 @@ async fn fee_bump(
         &signer_lease.account.public_key_bytes,
     )?;
     xdr::log_xdr_breakdown(&result.parsed_inner);
+
+    let summary = summarize_transaction(&result.parsed_inner);
+    state
+        .metrics
+        .set_current_sequence_number(summary.transaction_type, summary.sequence_number);
 
     let current_spend: i64 = state
         .quota_ledger
@@ -373,11 +417,15 @@ async fn fee_bump(
         ));
     }
 
-    state.quota_ledger.lock().await.push(state::SponsoredTransactionRecord {
-        created_at_ms: state::now_ms(),
-        fee_stroops: result.fee_amount,
-        tenant_id: api_key_config.tenant_id.to_string(),
-    });
+    state
+        .quota_ledger
+        .lock()
+        .await
+        .push(state::SponsoredTransactionRecord {
+            created_at_ms: state::now_ms(),
+            fee_stroops: result.fee_amount,
+            tenant_id: api_key_config.tenant_id.to_string(),
+        });
 
     if !body.submit.unwrap_or(false) {
         let response = Json(FeeBumpReadyResponse {
@@ -399,7 +447,10 @@ async fn fee_bump(
         ));
     }
 
-    let submission = state.horizon.submit_transaction(&result.fee_bump_xdr).await?;
+    let submission = state
+        .horizon
+        .submit_transaction(&result.fee_bump_xdr)
+        .await?;
     let now = iso_now();
     state.transaction_store.lock().await.insert(
         submission.hash.clone(),
@@ -443,7 +494,8 @@ fn with_limit_headers(
     let headers = response.headers_mut();
     headers.insert(
         HeaderName::from_static("x-ratelimit-limit"),
-        HeaderValue::from_str(&api_limit.limit.to_string()).unwrap_or(HeaderValue::from_static("0")),
+        HeaderValue::from_str(&api_limit.limit.to_string())
+            .unwrap_or(HeaderValue::from_static("0")),
     );
     headers.insert(
         HeaderName::from_static("x-ratelimit-remaining"),
@@ -566,8 +618,8 @@ const DASHBOARD_HTML: &str = r#"<!doctype html>
       </section>
       <section class="grid">
         <article class="metric"><strong>Runtime</strong><div>Rust + Axum</div></article>
-        <article class="metric"><strong>Static Delivery</strong><div>Bundled In-Binary</div></article>
-        <article class="metric"><strong>Routes</strong><div>/health /fee-bump /test/*</div></article>
+        <article class="metric"><strong>Observability</strong><div>/health /metrics /fee-bump</div></article>
+        <article class="metric"><strong>Routes</strong><div>/health /metrics /fee-bump /test/*</div></article>
       </section>
       <section class="panel" style="margin-top:18px">
         <strong>Live Health Snapshot</strong>

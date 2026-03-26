@@ -161,7 +161,9 @@ fn sign_fee_bump(
     let network_hash: [u8; 32] = Sha256::digest(network_passphrase.as_bytes()).into();
     let payload = TransactionSignaturePayload {
         network_id: Hash(network_hash),
-        tagged_transaction: TransactionSignaturePayloadTaggedTransaction::TxFeeBump(fee_bump.clone()),
+        tagged_transaction: TransactionSignaturePayloadTaggedTransaction::TxFeeBump(
+            fee_bump.clone(),
+        ),
     };
     let signature_payload = payload.to_xdr(Limits::none()).map_err(|error| {
         AppError::new(

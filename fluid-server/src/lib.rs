@@ -285,6 +285,7 @@ fn sha256(input: impl AsRef<[u8]>) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stellar_xdr::curr::{DecoratedSignature, Signature, SignatureHint, VecM};
 
     const TEST_NETWORK_PASSPHRASE: &str = "Test SDF Network ; September 2015";
     const TEST_SECRET_KEY: &str = "SDMOYUZMPBA5SDXYC7346UPSFC3LA2QSHWI67M7ZW6G2D55TJ2H3A4IE";
@@ -317,5 +318,80 @@ mod tests {
         let message = error.to_string();
 
         assert!(message.contains("invalid Stellar secret key"));
+    }
+
+    #[test]
+    fn public_key_wrapper_returns_expected_key() {
+        let public_key = public_key_from_secret(TEST_SECRET_KEY).unwrap();
+        assert_eq!(public_key, TEST_PUBLIC_KEY);
+    }
+
+    #[test]
+    fn transaction_hash_wrapper_matches_fixture_hash() {
+        let tx_hash = transaction_hash_hex(UNSIGNED_XDR, TEST_NETWORK_PASSPHRASE).unwrap();
+        assert_eq!(tx_hash, TX_HASH_HEX);
+    }
+
+    #[test]
+    fn wasm_wrapper_signs_fixture_transaction() {
+        let result = sign_transaction_xdr(UNSIGNED_XDR, TEST_SECRET_KEY, TEST_NETWORK_PASSPHRASE)
+            .expect("wasm-compatible wrapper should sign the fixture XDR");
+
+        assert_eq!(result.signed_xdr(), SIGNED_XDR);
+        assert_eq!(result.signer_public_key(), TEST_PUBLIC_KEY);
+        assert_eq!(result.transaction_hash_hex(), TX_HASH_HEX);
+        assert_eq!(result.signature_count(), 1);
+    }
+
+    #[test]
+    fn parse_transaction_envelope_rejects_invalid_xdr() {
+        let error = parse_transaction_envelope("not-base64").unwrap_err();
+        assert!(matches!(error, SigningError::InvalidEnvelope(_)));
+    }
+
+    #[test]
+    fn helper_functions_produce_expected_values() {
+        let signer = signer_context(TEST_SECRET_KEY).unwrap();
+        let envelope = parse_transaction_envelope(SIGNED_XDR).unwrap();
+
+        assert_eq!(envelope_signature_count(&envelope), 1);
+        assert_eq!(
+            signature_hint(&signer.public_key_bytes),
+            [0x3A, 0x78, 0xEA, 0x3C]
+        );
+        assert_eq!(
+            hex::encode(sha256("fluid")),
+            "5e0502adfb96f1f1544d24f00c99b269c12570acfd994666ffb86424e0835370"
+        );
+    }
+
+    #[test]
+    fn transaction_hash_matches_internal_fixture_hash() {
+        let envelope = parse_transaction_envelope(UNSIGNED_XDR).unwrap();
+        let tx_hash = transaction_hash(&envelope, TEST_NETWORK_PASSPHRASE).unwrap();
+
+        assert_eq!(hex::encode(tx_hash), TX_HASH_HEX);
+    }
+
+    #[test]
+    fn push_signature_rejects_overflow() {
+        let existing: VecM<DecoratedSignature, 20> = (0..20)
+            .map(|_| DecoratedSignature {
+                hint: SignatureHint([0, 0, 0, 0]),
+                signature: Signature(vec![1u8; 64].try_into().unwrap()),
+            })
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        let result = push_signature(
+            &existing,
+            DecoratedSignature {
+                hint: SignatureHint([1, 2, 3, 4]),
+                signature: Signature(vec![2u8; 64].try_into().unwrap()),
+            },
+        );
+
+        assert!(matches!(result, Err(SigningError::SignatureOverflow)));
     }
 }

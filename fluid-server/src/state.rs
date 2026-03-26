@@ -14,6 +14,7 @@ use tracing::info;
 use crate::{
     config::{Config, HorizonSelectionStrategy},
     error::AppError,
+    metrics::AppMetrics,
 };
 
 #[derive(Clone)]
@@ -21,6 +22,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub global_limiter: Arc<RateLimiter>,
     pub horizon: Arc<HorizonCluster>,
+    pub metrics: Arc<AppMetrics>,
     pub quota_ledger: Arc<Mutex<Vec<SponsoredTransactionRecord>>>,
     pub signer_pool: Arc<SignerPool>,
     pub transaction_store: Arc<Mutex<HashMap<String, TransactionRecord>>>,
@@ -182,6 +184,12 @@ impl AppState {
                 &config.horizon_urls,
                 config.horizon_selection_strategy,
             )),
+            metrics: Arc::new(AppMetrics::new(
+                std::env::var("FLUID_AVAILABLE_ACCOUNT_BALANCE")
+                    .ok()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0),
+            )),
             quota_ledger: Arc::new(Mutex::new(Vec::new())),
             signer_pool: Arc::new(SignerPool::new(secrets)?),
             transaction_store: Arc::new(Mutex::new(HashMap::new())),
@@ -279,10 +287,12 @@ impl RateLimiter {
     pub async fn check(&self, key: &str) -> Result<RateLimitResult, AppError> {
         let mut guard = self.entries.lock().await;
         let now_ms = now_ms();
-        let entry = guard.entry(key.to_string()).or_insert_with(|| RateLimitEntry {
-            count: 0,
-            reset_time_ms: now_ms + u128::from(self.window_ms),
-        });
+        let entry = guard
+            .entry(key.to_string())
+            .or_insert_with(|| RateLimitEntry {
+                count: 0,
+                reset_time_ms: now_ms + u128::from(self.window_ms),
+            });
 
         if now_ms >= entry.reset_time_ms {
             entry.count = 0;
@@ -343,7 +353,10 @@ impl HorizonCluster {
             .collect()
     }
 
-    pub async fn submit_transaction(&self, tx_xdr: &str) -> Result<HorizonSubmissionResult, AppError> {
+    pub async fn submit_transaction(
+        &self,
+        tx_xdr: &str,
+    ) -> Result<HorizonSubmissionResult, AppError> {
         let order = self.node_order().await;
         let mut last_error = None;
 
@@ -397,7 +410,8 @@ impl HorizonCluster {
                     ));
                 }
                 Err(error) => {
-                    self.mark_node_inactive(*node_index, &error.to_string()).await;
+                    self.mark_node_inactive(*node_index, &error.to_string())
+                        .await;
                     last_error = Some(error.to_string());
                 }
             }
@@ -413,7 +427,10 @@ impl HorizonCluster {
         ))
     }
 
-    pub async fn get_transaction(&self, hash: &str) -> Result<HorizonTransactionResponse, AppError> {
+    pub async fn get_transaction(
+        &self,
+        hash: &str,
+    ) -> Result<HorizonTransactionResponse, AppError> {
         let order = self.node_order().await;
         let mut last_error = None;
 
@@ -453,7 +470,8 @@ impl HorizonCluster {
                     ));
                 }
                 Err(error) => {
-                    self.mark_node_inactive(node_index, &error.to_string()).await;
+                    self.mark_node_inactive(node_index, &error.to_string())
+                        .await;
                     last_error = Some(error.to_string());
                 }
             }
@@ -475,7 +493,13 @@ impl HorizonCluster {
 
         match self.strategy {
             HorizonSelectionStrategy::Priority => {
-                indexes.sort_by_key(|index| if guard[*index].state == "Active" { 0 } else { 1 });
+                indexes.sort_by_key(|index| {
+                    if guard[*index].state == "Active" {
+                        0
+                    } else {
+                        1
+                    }
+                });
             }
             HorizonSelectionStrategy::RoundRobin => {
                 if !indexes.is_empty() {
@@ -540,7 +564,7 @@ fn decode_secret(secret: &str) -> Result<([u8; 32], String), AppError> {
     let public_key_bytes = signing_key.verifying_key().to_bytes();
     let public_key = Strkey::PublicKeyEd25519(ed25519::PublicKey(public_key_bytes)).to_string();
 
-    Ok((public_key_bytes, public_key))
+    Ok((public_key_bytes, public_key.to_string()))
 }
 
 pub fn now_ms() -> u128 {

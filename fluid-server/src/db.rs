@@ -6,8 +6,12 @@ use uuid::Uuid;
 
 /// Initialize PostgreSQL connection pool with configurable settings
 pub async fn create_pool() -> Result<PgPool, sqlx::Error> {
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable must be set");
+    let database_url = std::env::var("DATABASE_URL").map_err(|error| {
+        sqlx::Error::Configuration(Box::new(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("DATABASE_URL environment variable must be set: {error}"),
+        )))
+    })?;
 
     let max_connections = std::env::var("DB_MAX_CONNECTIONS")
         .ok()
