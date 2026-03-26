@@ -5,11 +5,13 @@ The Fluid server is a Node.js/TypeScript HTTP service that wraps signed Stellar 
 ## Quick Start
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Configure environment:
+
 ```bash
 cp .env.example .env
 ```
@@ -17,12 +19,14 @@ cp .env.example .env
 Edit `.env` and set `FLUID_FEE_PAYER_SECRET`.
 
 3. Build and run:
+
 ```bash
 npm run build
 npm start
 ```
 
 Or for development:
+
 ```bash
 npm run dev
 ```
@@ -32,13 +36,21 @@ npm run dev
 See `.env.example` for all configuration options.
 
 Required:
-- `FLUID_FEE_PAYER_SECRET` - Your Stellar secret key for paying fees
+
+- Fee payer key material:
+  - Development-only fallback: `FLUID_FEE_PAYER_SECRET` (comma-separated Stellar secrets)
+  - Production (recommended): HashiCorp Vault KV (see `docs/vault.md`)
 
 Optional:
+
 - `FLUID_BASE_FEE` - Base fee in stroops (default: 100)
 - `FLUID_FEE_MULTIPLIER` - Fee multiplier (default: 2.0)
+- `LOG_LEVEL` - Logger level: `debug`, `info`, `warn`, or `error` (default: `debug` in development, `info` in production)
+- `LOG_PRETTY` - Enable `pino-pretty` in non-production environments (default: `false`, which preserves JSON logs)
 - `STELLAR_NETWORK_PASSPHRASE` - Network passphrase (default: Testnet)
-- `STELLAR_HORIZON_URL` - Horizon URL for submission
+- `STELLAR_HORIZON_URL` - Legacy single Horizon URL
+- `STELLAR_HORIZON_URLS` - Comma-separated Horizon URL list for failover
+- `FLUID_HORIZON_SELECTION` - `priority` or `round_robin` node selection (default: `priority`)
 - `PORT` - Server port (default: 3000)
 - `FLUID_RATE_LIMIT_WINDOW_MS` - Rate limit window in milliseconds (default: 60000)
 - `FLUID_RATE_LIMIT_MAX` - Max requests per window per IP (default: 5)
@@ -52,6 +64,7 @@ Optional:
 - `FLUID_ALERT_EMAIL_FROM` / `FLUID_ALERT_EMAIL_TO` - Email sender and comma-separated recipients
 
 Mock API keys for local development:
+
 - `fluid-free-demo-key` - Free tier, 2 requests per minute
 - `fluid-pro-demo-key` - Pro tier, 5 requests per minute
 
@@ -62,6 +75,7 @@ Mock API keys for local development:
 Health check endpoint.
 
 Response:
+
 ```json
 {
   "status": "ok",
@@ -80,6 +94,7 @@ Sends a manual low-balance alert through the configured Slack webhook and/or SMT
 Wraps a signed transaction in a fee-bump transaction.
 
 Request:
+
 ```json
 {
   "xdr": "<base64_encoded_signed_transaction_xdr>",
@@ -88,11 +103,13 @@ Request:
 ```
 
 Headers:
+
 ```http
 x-api-key: fluid-free-demo-key
 ```
 
 Response:
+
 ```json
 {
   "xdr": "<base64_encoded_fee_bump_transaction_xdr>",
@@ -101,7 +118,19 @@ Response:
 }
 ```
 
-If `submit: true` and `STELLAR_HORIZON_URL` is set, the server will submit the transaction and return the hash.
+If `submit: true` and Horizon URLs are configured, the server will submit the transaction and return the hash.
+
+## Horizon Failover
+
+The server now supports redundant Horizon submission and monitoring:
+
+- Configure multiple nodes with `STELLAR_HORIZON_URLS`
+- Use `FLUID_HORIZON_SELECTION=priority` to always prefer the first healthy node
+- Use `FLUID_HORIZON_SELECTION=round_robin` to rotate the starting node each request
+- Retry only retryable failures such as connection resets, timeouts, DNS failures, and 5xx/429 gateway responses
+- Do not retry final submission errors such as invalid transaction payloads returned as 4xx responses
+
+`GET /health` now includes `horizon_nodes` with each node's `Active` or `Inactive` status.
 
 If a key exceeds its tier limit, the server returns `429 Too Many Requests` with a response that cites the API key limit.
 
@@ -143,7 +172,33 @@ npm run dev
 npm run build
 npm start
 npm run watch
+npm run demo:horizon-failover
 ```
+
+## Logging
+
+The server uses `pino` as the primary logger. Logs are emitted as structured JSON by default so fields such as `level`, `tenant_id`, `tx_hash`, and `fee_payer` can be indexed by Datadog, ELK, or CloudWatch.
+
+Example JSON log:
+
+```json
+{
+  "level": "info",
+  "time": "2026-03-25T18:05:41.221Z",
+  "service": "fluid-server",
+  "env": "production",
+  "component": "fee_bump_handler",
+  "msg": "Fee bump transaction submitted successfully",
+  "tenant_id": "tenant_123",
+  "tx_hash": "3f1d9b...",
+  "fee_payer": "GABCD...",
+  "node_url": "https://horizon-testnet.stellar.org",
+  "submission_attempts": 1,
+  "final_fee_stroops": 200
+}
+```
+
+If you want human-readable logs locally, set `LOG_PRETTY=true` while keeping `NODE_ENV` outside production.
 
 ## Signing Benchmark
 
@@ -155,6 +210,16 @@ npm run benchmark:signing
 
 That command builds the Rust signer, compares it against the current Node.js signing path, and writes the report to `server/benchmarks/signing-report.md`.
 The GitHub Actions benchmark workflow also writes the same report back to the feature branch after a successful run.
+
+## Signer Pool Test
+
+Run the multi-account concurrency test with:
+
+```bash
+npm run test:signer-pool
+```
+
+That command builds the native signer, exercises the `SignerPool` across five concurrent accounts plus a 200-request load burst, and prints `POOL_TEST` log lines showing five distinct accounts signing five different transactions simultaneously.
 
 ## Project Structure
 

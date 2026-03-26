@@ -1,8 +1,12 @@
-import { Request, Response, NextFunction } from "express";
+import { NextFunction, Request, Response } from "express";
+import { createLogger, serializeError } from "../utils/logger";
+
 import { AppError } from "../errors/AppError";
 
+const logger = createLogger({ component: "error_handler" });
+
 // 404 - Unknown route handler
-export function notFoundHandler(req: Request, res: Response): void {
+export function notFoundHandler (req: Request, res: Response): void {
     res.status(404).json({
         error: `Route ${req.method} ${req.path} not found`,
         code: "NOT_FOUND",
@@ -10,7 +14,7 @@ export function notFoundHandler(req: Request, res: Response): void {
 }
 
 // Global error handler
-export function globalErrorHandler(
+export function globalErrorHandler (
     err: Error,
     req: Request,
     res: Response,
@@ -27,7 +31,14 @@ export function globalErrorHandler(
     }
 
     // Unhandled / unexpected errors
-    console.error("Unhandled error:", err);
+    logger.error(
+        {
+            ...serializeError(err),
+            method: req.method,
+            path: req.path,
+        },
+        "Unhandled request error"
+    );
 
     res.status(500).json({
         error: isProd ? "An unexpected error occurred" : err.message,

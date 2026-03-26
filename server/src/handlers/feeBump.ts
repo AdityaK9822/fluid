@@ -12,28 +12,31 @@ import { transactionStore } from "../workers/transactionStore";
 
 interface FeeBumpResponse {
   xdr: string;
-  status: string;
+  status: "ready" | "submitted";
   hash?: string;
   fee_payer: string;
+  submitted_via?: string;
+  submission_attempts?: number;
 }
 
-export async function feeBumpHandler(
+export async function feeBumpHandler (
   req: Request,
   res: Response,
   next: NextFunction,
   config: Config,
 ): Promise<void> {
   try {
-    const result = FeeBumpSchema.safeParse(req.body);
+    const parsedBody = FeeBumpSchema.safeParse(req.body);
 
     if (!result.success) {
       console.warn(
         "Validation failed for fee-bump request:",
         result.error.format(),
       );
+
       return next(
         new AppError(
-          `Validation failed: ${JSON.stringify(result.error.format())}`,
+          `Validation failed: ${JSON.stringify(parsedBody.error.format())}`,
           400,
           "INVALID_XDR",
         ),
@@ -107,12 +110,11 @@ export async function feeBumpHandler(
       return;
     }
 
-    console.log("Fee calculation:", {
-      operationCount,
-      baseFee: config.baseFee,
-      multiplier: config.feeMultiplier,
-      finalFee: feeAmount,
-    });
+      // Preflight simulation for Soroban transactions
+      const isSoroban = innerTransaction.operations.some(
+        (op: any) =>
+          ["invokeHostFunction", "extendFootprintTtl", "restoreFootprint"].includes(op.type)
+      );
 
     const feeBumpTx = StellarSdk.TransactionBuilder.buildFeeBumpTransaction(
       feePayerAccount.keypair,

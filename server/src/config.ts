@@ -1,13 +1,31 @@
+import { SignerPool } from "./signing";
 import StellarSdk from "@stellar/stellar-sdk";
 
+export type HorizonSelectionStrategy = "priority" | "round_robin";
+
 export interface FeePayerAccount {
-  secret: string;
   publicKey: string;
-  keypair: any;
+  keypair: ReturnType<typeof StellarSdk.Keypair.fromSecret>;
+  secretSource:
+  | { type: "env"; secret: string }
+  | { type: "vault"; secretPath: string };
+}
+
+export interface VaultConfig {
+  addr: string;
+  token?: string;
+  appRole?: {
+    roleId: string;
+    secretId: string;
+  };
+  kvMount: string;
+  kvVersion: 1 | 2;
+  secretField: string;
 }
 
 export interface Config {
   feePayerAccounts: FeePayerAccount[];
+  signerPool: SignerPool;
   baseFee: number;
   feeMultiplier: number;
   networkPassphrase: string;
@@ -36,24 +54,108 @@ export interface AlertingConfig {
   email?: AlertEmailConfig;
 }
 
-export function loadConfig(): Config {
-  const rawSecrets = process.env.FLUID_FEE_PAYER_SECRET;
-  if (!rawSecrets) {
-    throw new Error("FLUID_FEE_PAYER_SECRET environment variable is required");
+export function loadConfig (): Config {
+  const baseFee = parseInt(process.env.FLUID_BASE_FEE || "100", 10);
+  const feeMultiplier = parseFloat(process.env.FLUID_FEE_MULTIPLIER || "2.0");
+  const networkPassphrase =
+    process.env.STELLAR_NETWORK_PASSPHRASE ||
+    "Test SDF Network ; September 2015";
+  const configuredHorizonUrls = parseCommaSeparatedList(
+    process.env.STELLAR_HORIZON_URLS
+  );
+  const legacyHorizonUrl = process.env.STELLAR_HORIZON_URL?.trim();
+  const horizonUrls =
+    configuredHorizonUrls.length > 0
+      ? configuredHorizonUrls
+      : legacyHorizonUrl
+        ? [legacyHorizonUrl]
+        : [];
+  const horizonSelectionStrategy: HorizonSelectionStrategy =
+    process.env.FLUID_HORIZON_SELECTION === "round_robin"
+      ? "round_robin"
+      : "priority";
+  const rateLimitWindowMs = parseInt(
+    process.env.FLUID_RATE_LIMIT_WINDOW_MS || "60000",
+    10
+  );
+  const rateLimitMax = parseInt(process.env.FLUID_RATE_LIMIT_MAX || "5", 10);
+  const allowedOrigins = parseCommaSeparatedList(process.env.FLUID_ALLOWED_ORIGINS);
+  const maxXdrSize = parseInt(process.env.FLUID_MAX_XDR_SIZE || "10240", 10);
+  const maxOperations = parseInt(process.env.FLUID_MAX_OPERATIONS || "100", 10);
+  const vault = loadVaultConfig();
+
+  const sharedConfig = {
+    allowedOrigins,
+    baseFee,
+    feeMultiplier,
+    horizonSelectionStrategy,
+    horizonUrl: horizonUrls[0],
+    horizonUrls,
+    maxOperations,
+    maxXdrSize,
+    networkPassphrase,
+    rateLimitMax,
+    rateLimitWindowMs,
+    stellarRpcUrl: process.env.STELLAR_RPC_URL,
+    vault,
+  };
+
+  const vaultSecretPaths = parseCommaSeparatedList(
+    process.env.FLUID_FEE_PAYER_VAULT_SECRET_PATHS
+  );
+  const vaultPublicKeys = parseCommaSeparatedList(
+    process.env.FLUID_FEE_PAYER_PUBLIC_KEYS
+  );
+
+  if (vault && vaultSecretPaths.length > 0 && vaultPublicKeys.length > 0) {
+    if (vaultSecretPaths.length !== vaultPublicKeys.length) {
+      throw new Error(
+        "Vault mode requires FLUID_FEE_PAYER_VAULT_SECRET_PATHS and FLUID_FEE_PAYER_PUBLIC_KEYS to have the same number of entries"
+      );
+    }
+
+    const feePayerAccounts: FeePayerAccount[] = vaultPublicKeys.map(
+      (publicKey, index) => ({
+        publicKey,
+        keypair: StellarSdk.Keypair.fromPublicKey(publicKey),
+        secretSource: {
+          type: "vault",
+          secretPath: vaultSecretPaths[index],
+        },
+      })
+    );
+
+    const signerPool = new SignerPool(
+      feePayerAccounts.map((account) => ({
+        keypair: account.keypair,
+        secret:
+          account.secretSource.type === "vault"
+            ? `vault:${account.secretSource.secretPath}`
+            : account.secretSource.secret,
+      }))
+    );
+
+    return {
+      ...sharedConfig,
+      feePayerAccounts,
+      signerPool,
+    };
   }
 
-  // Support comma-separated list of secrets
-  const secrets = rawSecrets.split(",").map((s) => s.trim()).filter(Boolean);
+  const secrets = parseCommaSeparatedList(process.env.FLUID_FEE_PAYER_SECRET);
   if (secrets.length === 0) {
-    throw new Error("FLUID_FEE_PAYER_SECRET must contain at least one secret");
+    throw new Error(
+      "No fee payer secrets configured. Provide either Vault settings (VAULT_ADDR + token/approle + FLUID_FEE_PAYER_VAULT_SECRET_PATHS + FLUID_FEE_PAYER_PUBLIC_KEYS) or set FLUID_FEE_PAYER_SECRET for env-based development."
+    );
   }
 
   const feePayerAccounts: FeePayerAccount[] = secrets.map((secret) => {
     const keypair = StellarSdk.Keypair.fromSecret(secret);
+
     return {
-      secret,
       publicKey: keypair.publicKey(),
       keypair,
+      secretSource: { type: "env", secret },
     };
   });
 
@@ -87,6 +189,7 @@ export function loadConfig(): Config {
   const email = loadAlertEmailConfig();
 
   return {
+    ...sharedConfig,
     feePayerAccounts,
     baseFee,
     feeMultiplier,
@@ -163,12 +266,17 @@ function parseAllowedOrigins(value: string | undefined): string[] {
 // Round-robin counter (module-level, safe for single-threaded Node.js event loop)
 let rrIndex = 0;
 
-/**
- * Pick the next fee payer account using Round Robin strategy.
- */
-export function pickFeePayerAccount(config: Config): FeePayerAccount {
-  const accounts = config.feePayerAccounts;
-  const account = accounts[rrIndex % accounts.length];
-  rrIndex = (rrIndex + 1) % accounts.length;
+export function pickFeePayerAccount (config: Config): FeePayerAccount {
+  const snapshot = config.signerPool.getSnapshot();
+  const nextPublicKey = snapshot[rrIndex % snapshot.length]?.publicKey;
+  rrIndex = (rrIndex + 1) % snapshot.length;
+  const account = config.feePayerAccounts.find(
+    (candidate) => candidate.publicKey === nextPublicKey
+  );
+
+  if (!account) {
+    throw new Error("Failed to select fee payer account from signer pool");
+  }
+
   return account;
 }

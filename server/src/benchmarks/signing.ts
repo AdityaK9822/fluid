@@ -1,7 +1,11 @@
-import { mkdir, writeFile } from "fs/promises";
+import { createLogger, serializeError } from "../utils/logger";
 import { dirname, resolve } from "path";
-import StellarSdk from "@stellar/stellar-sdk";
+import { mkdir, writeFile } from "fs/promises";
 import { signTransaction, signTransactionWithNode } from "../signing";
+
+import StellarSdk from "@stellar/stellar-sdk";
+
+const logger = createLogger({ component: "signing_benchmark" });
 
 interface BenchmarkResult {
   avgMs: number;
@@ -22,7 +26,7 @@ type FeeBumpTransaction = ReturnType<
 >;
 type Keypair = ReturnType<typeof StellarSdk.Keypair.random>;
 
-function percentile(sortedValues: number[], percentileValue: number): number {
+function percentile (sortedValues: number[], percentileValue: number): number {
   const index = Math.min(
     sortedValues.length - 1,
     Math.floor(sortedValues.length * percentileValue)
@@ -30,7 +34,7 @@ function percentile(sortedValues: number[], percentileValue: number): number {
   return sortedValues[index];
 }
 
-function summarize(name: string, durationsNs: number[]): BenchmarkResult {
+function summarize (name: string, durationsNs: number[]): BenchmarkResult {
   const sorted = [...durationsNs].sort((left, right) => left - right);
   const totalNs = durationsNs.reduce((sum, duration) => sum + duration, 0);
   const avgNs = totalNs / durationsNs.length;
@@ -46,7 +50,7 @@ function summarize(name: string, durationsNs: number[]): BenchmarkResult {
   };
 }
 
-function buildUnsignedFeeBumpTransaction(
+function buildUnsignedFeeBumpTransaction (
   userKeypair: Keypair,
   feePayerPublicKey: string
 ): FeeBumpTransaction {
@@ -75,11 +79,11 @@ function buildUnsignedFeeBumpTransaction(
   );
 }
 
-function resetSignatures(transaction: FeeBumpTransaction): void {
+function resetSignatures (transaction: FeeBumpTransaction): void {
   transaction.signatures.length = 0;
 }
 
-async function benchmark(
+async function benchmark (
   name: string,
   signer: (transaction: FeeBumpTransaction) => Promise<void> | void
 ): Promise<BenchmarkResult> {
@@ -113,7 +117,7 @@ async function benchmark(
   return summarize(name, durationsNs);
 }
 
-async function verifyParity(secret: string): Promise<void> {
+async function verifyParity (secret: string): Promise<void> {
   const userKeypair = StellarSdk.Keypair.random();
   const feePayerKeypair = StellarSdk.Keypair.fromSecret(secret);
 
@@ -141,7 +145,7 @@ async function verifyParity(secret: string): Promise<void> {
   }
 }
 
-function toTableRow(result: BenchmarkResult, baselineAvgMs: number): string {
+function toTableRow (result: BenchmarkResult, baselineAvgMs: number): string {
   const speedup = baselineAvgMs / result.avgMs;
   return `| ${result.name} | ${result.avgMs.toFixed(4)} | ${result.p50Ms.toFixed(
     4
@@ -150,7 +154,7 @@ function toTableRow(result: BenchmarkResult, baselineAvgMs: number): string {
   )}x |`;
 }
 
-async function main(): Promise<void> {
+async function main (): Promise<void> {
   const feePayerKeypair = StellarSdk.Keypair.random();
   const feePayerSecret = feePayerKeypair.secret();
 
@@ -189,11 +193,11 @@ async function main(): Promise<void> {
   await mkdir(dirname(reportPath), { recursive: true });
   await writeFile(reportPath, report, "utf8");
 
-  console.log(report);
-  console.log(`\nReport written to ${reportPath}`);
+  logger.info({ report }, "Signing benchmark report generated");
+  logger.info({ report_path: reportPath }, "Signing benchmark report written");
 }
 
 main().catch((error) => {
-  console.error(error);
+  logger.error({ ...serializeError(error) }, "Signing benchmark failed");
   process.exitCode = 1;
 });

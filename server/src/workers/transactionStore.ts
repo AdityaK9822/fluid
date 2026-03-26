@@ -1,49 +1,55 @@
 export interface TransactionRecord {
   hash: string;
+  tenantId: string;
   status: 'pending' | 'submitted' | 'success' | 'failed';
   createdAt: Date;
   updatedAt: Date;
 }
+
+import { createLogger } from "../utils/logger";
+
+const logger = createLogger({ component: "transaction_store" });
 
 // Simple in-memory storage for transactions
 // In production, this should be replaced with a proper database
 class TransactionStore {
   private transactions: Map<string, TransactionRecord> = new Map();
 
-  addTransaction(hash: string, status: 'pending' | 'submitted'): void {
+  addTransaction (hash: string, tenantId: string, status: 'pending' | 'submitted'): void {
     const record: TransactionRecord = {
       hash,
+      tenantId,
       status,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     this.transactions.set(hash, record);
-    console.log(`[TransactionStore] Added transaction ${hash} with status ${status}`);
+    logger.info({ tx_hash: hash, tenant_id: tenantId, status }, "Tracked transaction");
   }
 
-  updateTransactionStatus(hash: string, status: 'success' | 'failed'): void {
+  updateTransactionStatus (hash: string, status: 'success' | 'failed'): void {
     const record = this.transactions.get(hash);
     if (record) {
       record.status = status;
       record.updatedAt = new Date();
-      console.log(`[TransactionStore] Updated transaction ${hash} to status ${status}`);
+      logger.info({ tx_hash: hash, tenant_id: record.tenantId, status }, "Updated transaction status");
     } else {
-      console.log(`[TransactionStore] Transaction ${hash} not found for status update`);
+      logger.warn({ tx_hash: hash, status }, "Transaction not found for status update");
     }
   }
 
-  getPendingTransactions(): TransactionRecord[] {
+  getPendingTransactions (): TransactionRecord[] {
     const pending = Array.from(this.transactions.values())
       .filter(tx => tx.status === 'pending' || tx.status === 'submitted');
-    console.log(`[TransactionStore] Found ${pending.length} pending/submitted transactions`);
+    logger.debug({ count: pending.length }, "Loaded pending transactions");
     return pending;
   }
 
-  getTransaction(hash: string): TransactionRecord | undefined {
+  getTransaction (hash: string): TransactionRecord | undefined {
     return this.transactions.get(hash);
   }
 
-  getAllTransactions(): TransactionRecord[] {
+  getAllTransactions (): TransactionRecord[] {
     return Array.from(this.transactions.values());
   }
 }

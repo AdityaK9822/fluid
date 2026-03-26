@@ -1,8 +1,12 @@
-import dotenv from "dotenv";
-dotenv.config();
+import { createLogger, serializeError } from "../src/utils/logger";
 
 import StellarSdk from "@stellar/stellar-sdk";
 import axios from "axios";
+import dotenv from "dotenv";
+dotenv.config();
+
+
+const logger = createLogger({ component: "test_fee_bump_script" });
 
 const serverUrl = "http://localhost:3000/fee-bump";
 
@@ -16,7 +20,7 @@ if (!sourceSecret) {
 // Create keypair
 const sourceKeypair = StellarSdk.Keypair.fromSecret(sourceSecret);
 
-async function main() {
+async function main () {
   const server = new StellarSdk.Horizon.Server(
     "https://horizon-testnet.stellar.org",
   );
@@ -85,7 +89,10 @@ async function main() {
     },
   );
 
-  console.log(response.data);
+  logger.info({ response: response.data }, "Received fee bump response");
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  logger.error({ ...serializeError(error) }, "Fee bump test script failed");
+  process.exitCode = 1;
+});

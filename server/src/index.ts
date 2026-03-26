@@ -1,17 +1,24 @@
-import cors from "cors";
-import dotenv from "dotenv";
+import { createLogger, serializeError } from "./utils/logger";
 import express, { NextFunction, Request, Response } from "express";
-import rateLimit from "express-rate-limit";
-import { loadConfig } from "./config";
-import { feeBumpHandler } from "./handlers/feeBump";
+import {
+  getHorizonFailoverClient,
+  initializeHorizonFailoverClient,
+} from "./horizon/failoverClient";
+import {
+  getLedgerMonitor,
+  initializeLedgerMonitor,
+} from "./workers/ledgerMonitor";
+import { globalErrorHandler, notFoundHandler } from "./middleware/errorHandler";
+
+import { AppError } from "./errors/AppError";
 import { apiKeyMiddleware } from "./middleware/apiKeys";
 import { apiKeyRateLimit } from "./middleware/rateLimit";
 import { AlertService } from "./services/alertService";
 import { initializeBalanceMonitor } from "./workers/balanceMonitor";
 import { initializeLedgerMonitor } from "./workers/ledgerMonitor";
 import { transactionStore } from "./workers/transactionStore";
-import { notFoundHandler, globalErrorHandler } from "./middleware/errorHandler";
-import { AppError } from "./errors/AppError";
+
+const logger = createLogger({ component: "server" });
 
 dotenv.config();
 
@@ -21,34 +28,35 @@ app.use(express.json());
 const config = loadConfig();
 const alertService = new AlertService(config.alerting);
 
-// Configure rate limiter
 const limiter = rateLimit({
   windowMs: config.rateLimitWindowMs,
   max: config.rateLimitMax,
-  message: { error: "Too many requests from this IP, please try again later.", code: "RATE_LIMITED" },
+  message: {
+    error: "Too many requests from this IP, please try again later.",
+    code: "RATE_LIMITED",
+  },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// CORS configuration with origin validation
 const corsOptions = {
   origin: (
     origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
+    callback: (err: Error | null, allow?: boolean) => void,
   ) => {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) {
       callback(null, false);
       return;
     }
 
-    // Check if the origin is in the allowed list
-    if (config.allowedOrigins.includes(origin)) {
+    if (
+      config.allowedOrigins.length === 0 ||
+      config.allowedOrigins.includes(origin)
+    ) {
       callback(null, true);
       return;
     }
 
-    // Reject the request - pass error to trigger error handler
     callback(new Error("Origin not allowed by CORS"), false);
   },
   credentials: true,
@@ -56,7 +64,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Error handler for CORS rejections
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   if (err.message === "Origin not allowed by CORS") {
     return next(new AppError("CORS not allowed", 403, "AUTH_FAILED"));
@@ -64,15 +71,27 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   next(err);
 });
 
-// Routes
 app.get("/health", (req: Request, res: Response) => {
-  const accounts = config.feePayerAccounts.map((a) => ({
-    publicKey: a.publicKey,
-    status: "active",
+  const accounts = config.signerPool.getSnapshot().map((account) => ({
+    publicKey: account.publicKey,
+    status: account.active ? "active" : "inactive",
+    in_flight: account.inFlight,
+    total_uses: account.totalUses,
+    sequence_number: account.sequenceNumber,
+    balance: account.balance,
   }));
+
   res.json({
     status: "ok",
     fee_payers: accounts,
+    horizon_nodes:
+      getHorizonFailoverClient()?.getNodeStatuses() ??
+      getLedgerMonitor()?.getNodeStatuses() ??
+      config.horizonUrls.map((url) => ({
+        url,
+        state: "Active",
+        consecutiveFailures: 0,
+      })),
     total: accounts.length,
     low_balance_alerting: {
       enabled:
@@ -88,6 +107,7 @@ app.get("/health", (req: Request, res: Response) => {
   });
 });
 
+// Fee bump endpoint
 app.post(
   "/fee-bump",
   apiKeyMiddleware,
@@ -98,17 +118,18 @@ app.post(
   },
 );
 
-// Test endpoint to manually add a pending transaction
 app.post("/test/add-transaction", (req: Request, res: Response) => {
-  const { hash, status = "pending" } = req.body;
+  const { hash, status = "pending", tenantId = "test-tenant" } = req.body;
+
   if (!hash) {
-    return res.status(400).json({ error: "Transaction hash is required" });
+    res.status(400).json({ error: "Transaction hash is required" });
+    return;
   }
-  transactionStore.addTransaction(hash, status);
+
+  transactionStore.addTransaction(hash, tenantId, status);
   res.json({ message: `Transaction ${hash} added with status ${status}` });
 });
 
-// Test endpoint to view all transactions
 app.get("/test/transactions", (req: Request, res: Response) => {
   const transactions = transactionStore.getAllTransactions();
   res.json({ transactions });
@@ -135,24 +156,21 @@ app.post(
 
 // 404 - must come after all routes
 app.use(notFoundHandler);
-
-// Global error handler - must be last
 app.use(globalErrorHandler);
 
 const PORT = process.env.PORT || 3000;
 
-// Initialize ledger monitor worker if Horizon URL is configured
-let ledgerMonitor: any = null;
-if (config.horizonUrl) {
+let ledgerMonitor: ReturnType<typeof initializeLedgerMonitor> | null = null;
+if (config.horizonUrls.length > 0) {
   try {
     ledgerMonitor = initializeLedgerMonitor(config);
     ledgerMonitor.start();
-    console.log("Ledger monitor worker started");
+    logger.info("Ledger monitor worker started");
   } catch (error) {
-    console.error("Failed to start ledger monitor:", error);
+    logger.error({ ...serializeError(error) }, "Failed to start ledger monitor");
   }
 } else {
-  console.log("No Horizon URL configured - ledger monitor disabled");
+  logger.info("No Horizon URLs configured; ledger monitor disabled");
 }
 
 let balanceMonitor: any = null;

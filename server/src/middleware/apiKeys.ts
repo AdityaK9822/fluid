@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { AppError } from "../errors/AppError";
+import prisma from "../utils/db";
 
 export interface ApiKeyConfig {
   key: string;
@@ -11,57 +12,23 @@ export interface ApiKeyConfig {
   dailyQuotaStroops: number;
 }
 
-const API_KEYS = new Map<string, ApiKeyConfig>([
-  [
-    "fluid-free-demo-key",
-    {
-      key: "fluid-free-demo-key",
-      tenantId: "tenant-demo-free",
-      name: "Demo Free dApp",
-      tier: "free",
-      maxRequests: 2,
-      windowMs: 60_000,
-      dailyQuotaStroops: 200,
-    },
-  ],
-  [
-    "fluid-pro-demo-key",
-    {
-      key: "fluid-pro-demo-key",
-      tenantId: "tenant-demo-pro",
-      name: "Demo Pro dApp",
-      tier: "pro",
-      maxRequests: 5,
-      windowMs: 60_000,
-      dailyQuotaStroops: 2_000,
-    },
-  ],
-]);
-
 function getApiKeyFromHeader(req: Request): string | undefined {
   const headerValue = req.header("x-api-key");
-
-  if (typeof headerValue !== "string") {
-    return undefined;
-  }
-
+  if (typeof headerValue !== "string") return undefined;
   const apiKey = headerValue.trim();
   return apiKey.length > 0 ? apiKey : undefined;
 }
 
 export function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 8) {
-    return `${apiKey.slice(0, 2)}***`;
-  }
-
+  if (apiKey.length <= 8) return `${apiKey.slice(0, 2)}***`;
   return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
 }
 
-export function apiKeyMiddleware(
+async function validateApiKey(
   req: Request,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const apiKey = getApiKeyFromHeader(req);
 
   if (!apiKey) {
@@ -74,16 +41,32 @@ export function apiKeyMiddleware(
     );
   }
 
-  const apiKeyConfig = API_KEYS.get(apiKey);
+  const keyRecord = await prisma.apiKey.findUnique({
+    where: { key: apiKey },
+  });
 
-  if (!apiKeyConfig) {
+  if (!keyRecord) {
     return next(new AppError("Invalid API key.", 403, "AUTH_FAILED"));
   }
+
+  const apiKeyConfig: ApiKeyConfig = {
+    key: keyRecord.key,
+    tenantId: keyRecord.tenantId,
+    name: keyRecord.name,
+    tier: keyRecord.tier as "free" | "pro",
+    maxRequests: keyRecord.maxRequests,
+    windowMs: keyRecord.windowMs,
+    dailyQuotaStroops: Number(keyRecord.dailyQuotaStroops),
+  };
 
   res.locals.apiKey = apiKeyConfig;
   next();
 }
 
-export function getApiKeyConfig(apiKey: string): ApiKeyConfig | undefined {
-  return API_KEYS.get(apiKey);
+export function apiKeyMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  validateApiKey(req, res, next).catch(next);
 }

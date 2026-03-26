@@ -8,12 +8,12 @@ export interface QuotaCheckResult {
   dailyQuotaStroops: number;
 }
 
-export function checkTenantDailyQuota(
+export async function checkTenantDailyQuota(
   tenant: Tenant,
   feeStroops: number,
   now: Date = new Date()
-): QuotaCheckResult {
-  const currentSpendStroops = getTenantDailySpendStroops(tenant.id, now);
+): Promise<QuotaCheckResult> {
+  const currentSpendStroops = await getTenantDailySpendStroops(tenant.id, now);
   const projectedSpendStroops = currentSpendStroops + feeStroops;
 
   return {

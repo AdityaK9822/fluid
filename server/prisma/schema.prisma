@@ -6,13 +6,42 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
-// Initial models for multi-tenancy and logging
 model Tenant {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   name      String
-  apiKey    String   @unique
+  apiKeys   ApiKey[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  prefix    String
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  active    Boolean  @default(true)
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  webhooks  WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  url         String
+  payload     Json
+  status      String   @default("pending") // pending, success, failed
+  retryCount  Int      @default(0)
+  lastError   String?
+  nextAttempt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([tenantId])
 }

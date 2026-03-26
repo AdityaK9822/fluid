@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use base64::{engine::general_purpose::STANDARD, Engine};
 use stellar_xdr::curr::{
     FeeBumpTransaction, FeeBumpTransactionInnerTx, Limits, Operation, OperationBody, ReadXdr,
@@ -14,6 +16,12 @@ pub enum ParsedTransaction {
     V1(Box<Transaction>),
     /// Fee-bump envelope wrapping an inner V1 transaction.
     FeeBump(Box<FeeBumpTransaction>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TransactionSummary {
+    pub sequence_number: i64,
+    pub transaction_type: &'static str,
 }
 
 /// Errors produced by [`parse_xdr`].
@@ -115,6 +123,25 @@ pub fn log_xdr_breakdown(parsed: &ParsedTransaction) {
     }
 }
 
+pub fn summarize_transaction(parsed: &ParsedTransaction) -> TransactionSummary {
+    match parsed {
+        ParsedTransaction::V0(tx) => TransactionSummary {
+            sequence_number: tx.seq_num.0,
+            transaction_type: "classic_v0",
+        },
+        ParsedTransaction::V1(tx) => TransactionSummary {
+            sequence_number: tx.seq_num.0,
+            transaction_type: "classic_v1",
+        },
+        ParsedTransaction::FeeBump(tx) => match &tx.inner_tx {
+            FeeBumpTransactionInnerTx::Tx(inner_env) => TransactionSummary {
+                sequence_number: inner_env.tx.seq_num.0,
+                transaction_type: "fee_bump",
+            },
+        },
+    }
+}
+
 fn operation_name(body: &OperationBody) -> &'static str {
     match body {
         OperationBody::CreateAccount(_) => "CreateAccount",
@@ -159,9 +186,9 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use stellar_xdr::curr::{
         Asset, FeeBumpTransaction, FeeBumpTransactionEnvelope, FeeBumpTransactionExt,
-        FeeBumpTransactionInnerTx, Limits, Memo, MuxedAccount, Operation, OperationBody,
-        PaymentOp, Preconditions, SequenceNumber, Transaction, TransactionEnvelope,
-        TransactionExt, TransactionV1Envelope, Uint256, VecM, WriteXdr,
+        FeeBumpTransactionInnerTx, Limits, Memo, MuxedAccount, Operation, OperationBody, PaymentOp,
+        Preconditions, SequenceNumber, Transaction, TransactionEnvelope, TransactionExt,
+        TransactionV1Envelope, Uint256, VecM, WriteXdr,
     };
 
     /// Build a minimal Classic V1 transaction with a single Payment op.
@@ -408,7 +435,10 @@ mod tests {
         let xdr = classic_v1_xdr();
         let padded = format!("   {xdr}   \n");
         let result = parse_xdr(&padded);
-        assert!(result.is_ok(), "whitespace-padded XDR should parse: {result:?}");
+        assert!(
+            result.is_ok(),
+            "whitespace-padded XDR should parse: {result:?}"
+        );
     }
 
     #[test]
