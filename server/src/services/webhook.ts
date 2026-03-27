@@ -5,6 +5,11 @@ import { createLogger, serializeError } from "../utils/logger";
 import Redis from "ioredis";
 import axios from "axios";
 import prisma from "../utils/db";
+import {
+  deserializeWebhookEventTypes,
+  mapTransactionStatusToWebhookEventType,
+  type WebhookEventType,
+} from "./webhookEventTypes";
 
 const connection = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 export const webhookLogger = createLogger({ component: "webhook_service" });
@@ -28,6 +33,7 @@ interface WebhookJobData {
 type WebhookStatus = "success" | "failed";
 
 interface WebhookPayload {
+  eventType: WebhookEventType;
   hash: string;
   status: WebhookStatus;
 }
@@ -84,9 +90,15 @@ export class WebhookService {
     hash: string,
     status: WebhookStatus
   ): Promise<void> {
+    const eventType = mapTransactionStatusToWebhookEventType(status);
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { id: true, webhookSecret: true, webhookUrl: true },
+      select: {
+        id: true,
+        webhookEventTypes: true,
+        webhookSecret: true,
+        webhookUrl: true,
+      },
     });
 
     if (!tenant) {
@@ -105,15 +117,39 @@ export class WebhookService {
       return;
     }
 
+    const enabledEventTypes = deserializeWebhookEventTypes(tenant.webhookEventTypes);
+    if (!enabledEventTypes.includes(eventType)) {
+      webhookLogger.debug(
+        {
+          enabled_event_types: enabledEventTypes,
+          event_type: eventType,
+          tenant_id: tenant.id,
+          tx_hash: hash,
+        },
+        "Webhook event filtered out for tenant"
+      );
+      return;
+    }
+
     if (!tenant.webhookSecret) {
       webhookLogger.error(
-        { tenant_id: tenant.id, tx_hash: hash, status, webhook_url: tenant.webhookUrl },
+        {
+          event_type: eventType,
+          status,
+          tenant_id: tenant.id,
+          tx_hash: hash,
+          webhook_url: tenant.webhookUrl,
+        },
         "Tenant has no webhook secret configured; refusing unsigned webhook dispatch"
       );
       return;
     }
 
-    const request = buildSignedWebhookRequest(tenant.webhookSecret, { hash, status });
+    const request = buildSignedWebhookRequest(tenant.webhookSecret, {
+      eventType,
+      hash,
+      status,
+    });
 
     try {
       const response = await fetch(tenant.webhookUrl, {

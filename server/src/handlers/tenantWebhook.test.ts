@@ -5,6 +5,7 @@ import { prisma } from "../utils/db";
 vi.mock("../utils/db", () => ({
   prisma: {
     tenant: {
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
   },
@@ -18,14 +19,27 @@ describe("updateWebhookHandler", () => {
   });
 
   it("updates webhook url and secret without returning the secret", async () => {
+    const updatedAt = new Date("2026-03-27T15:30:00.000Z");
+    mockPrisma.tenant.findUnique.mockResolvedValue({
+      id: "tenant-1",
+      name: "Tenant One",
+      webhookEventTypes: null,
+      webhookSecret: null,
+      webhookUrl: null,
+      updatedAt,
+    });
     mockPrisma.tenant.update.mockResolvedValue({
       id: "tenant-1",
+      name: "Tenant One",
+      webhookEventTypes: JSON.stringify(["tx.success", "tx.failed"]),
       webhookSecret: "super-secret",
       webhookUrl: "https://example.com/webhooks/fluid",
+      updatedAt,
     });
 
     const req: any = {
       body: {
+        eventTypes: ["tx.success", "tx.failed"],
         webhookSecret: "super-secret",
         webhookUrl: "https://example.com/webhooks/fluid",
       },
@@ -43,21 +57,39 @@ describe("updateWebhookHandler", () => {
 
     await updateWebhookHandler(req, res, next);
 
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
+      where: { id: "tenant-1" },
+      select: {
+        id: true,
+        name: true,
+        webhookUrl: true,
+        webhookEventTypes: true,
+        webhookSecret: true,
+        updatedAt: true,
+      },
+    });
     expect(mockPrisma.tenant.update).toHaveBeenCalledWith({
       where: { id: "tenant-1" },
       data: {
+        webhookEventTypes: JSON.stringify(["tx.success", "tx.failed"]),
         webhookSecret: "super-secret",
         webhookUrl: "https://example.com/webhooks/fluid",
       },
       select: {
         id: true,
+        name: true,
+        webhookEventTypes: true,
         webhookSecret: true,
         webhookUrl: true,
+        updatedAt: true,
       },
     });
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({
-      id: "tenant-1",
+      eventTypes: ["tx.success", "tx.failed"],
+      tenantId: "tenant-1",
+      tenantName: "Tenant One",
+      updatedAt: updatedAt.toISOString(),
       webhookSecretConfigured: true,
       webhookUrl: "https://example.com/webhooks/fluid",
     });
@@ -76,6 +108,7 @@ describe("updateWebhookHandler", () => {
 
     await updateWebhookHandler(req, res, next);
 
+    expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(mockPrisma.tenant.update).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith(
@@ -84,5 +117,60 @@ describe("updateWebhookHandler", () => {
       })
     );
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing event types when only rotating the secret", async () => {
+    const updatedAt = new Date("2026-03-27T15:31:00.000Z");
+    mockPrisma.tenant.findUnique.mockResolvedValue({
+      id: "tenant-1",
+      name: "Tenant One",
+      webhookEventTypes: JSON.stringify(["tx.failed"]),
+      webhookSecret: "old-secret",
+      webhookUrl: "https://example.com/webhooks/fluid",
+      updatedAt,
+    });
+    mockPrisma.tenant.update.mockResolvedValue({
+      id: "tenant-1",
+      name: "Tenant One",
+      webhookEventTypes: JSON.stringify(["tx.failed"]),
+      webhookSecret: "new-secret",
+      webhookUrl: "https://example.com/webhooks/fluid",
+      updatedAt,
+    });
+
+    const req: any = {
+      body: {
+        webhookSecret: "new-secret",
+      },
+    };
+    const res: any = {
+      locals: {
+        apiKey: {
+          tenantId: "tenant-1",
+        },
+      },
+      json: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+    };
+
+    await updateWebhookHandler(req, res, vi.fn());
+
+    expect(mockPrisma.tenant.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          webhookEventTypes: JSON.stringify(["tx.failed"]),
+          webhookSecret: "new-secret",
+          webhookUrl: "https://example.com/webhooks/fluid",
+        }),
+      })
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      eventTypes: ["tx.failed"],
+      tenantId: "tenant-1",
+      tenantName: "Tenant One",
+      updatedAt: updatedAt.toISOString(),
+      webhookSecretConfigured: true,
+      webhookUrl: "https://example.com/webhooks/fluid",
+    });
   });
 });

@@ -1,23 +1,34 @@
-import { NextFunction, Request, Response } from "express";
-import { ApiKeyConfig } from "../middleware/apiKeys";
+import { Request, Response } from "express";
+import prisma from "../utils/db";
 import { UpdateWebhookSchema } from "../schemas/tenantWebhook";
 import {
   deserializeWebhookEventTypes,
   serializeWebhookEventTypes,
 } from "../services/webhookEventTypes";
-import { prisma } from "../utils/db";
 
 const tenantModel = (prisma as any).tenant as {
+  findMany: (args: any) => Promise<any[]>;
   findUnique: (args: any) => Promise<any | null>;
   update: (args: any) => Promise<any>;
 };
+
+function requireAdminToken(req: Request, res: Response): boolean {
+  const token = req.header("x-admin-token");
+  const expected = process.env.FLUID_ADMIN_TOKEN;
+
+  if (!expected || token !== expected) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+
+  return true;
+}
 
 function toWebhookSettingsResponse(tenant: {
   id: string;
   name?: string | null;
   webhookUrl?: string | null;
   webhookEventTypes?: string | null;
-  webhookSecret?: string | null;
   updatedAt?: Date | null;
 }) {
   return {
@@ -25,57 +36,52 @@ function toWebhookSettingsResponse(tenant: {
     tenantName: tenant.name ?? null,
     webhookUrl: tenant.webhookUrl ?? null,
     eventTypes: deserializeWebhookEventTypes(tenant.webhookEventTypes),
-    webhookSecretConfigured: Boolean(tenant.webhookSecret),
     updatedAt: tenant.updatedAt?.toISOString() ?? null,
   };
 }
 
-export async function getWebhookSettingsHandler(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  const apiKeyConfig = res.locals.apiKey as ApiKeyConfig;
-  const { tenantId } = apiKeyConfig;
+export async function listWebhookSettingsHandler(req: Request, res: Response) {
+  if (!requireAdminToken(req, res)) {
+    return;
+  }
 
   try {
-    const tenant = await tenantModel.findUnique({
-      where: { id: tenantId },
+    const tenants = await tenantModel.findMany({
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         name: true,
         webhookUrl: true,
         webhookEventTypes: true,
-        webhookSecret: true,
         updatedAt: true,
       },
     });
 
-    if (!tenant) {
-      res.status(404).json({ error: "Tenant not found" });
-      return;
-    }
-
-    res.status(200).json(toWebhookSettingsResponse(tenant));
+    res.json({
+      tenants: tenants.map(toWebhookSettingsResponse),
+    });
   } catch (error) {
-    next(error);
+    res.status(500).json({ error: "Failed to list webhook settings" });
   }
 }
 
-export async function updateWebhookHandler(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
+export async function updateWebhookSettingsHandler(req: Request, res: Response) {
+  if (!requireAdminToken(req, res)) {
+    return;
+  }
+
+  const { tenantId } = req.params;
   const result = UpdateWebhookSchema.safeParse(req.body);
+
+  if (!tenantId) {
+    res.status(400).json({ error: "Tenant ID is required" });
+    return;
+  }
 
   if (!result.success) {
     res.status(400).json({ error: result.error.format() });
     return;
   }
-
-  const apiKeyConfig = res.locals.apiKey as ApiKeyConfig;
-  const { tenantId } = apiKeyConfig;
 
   try {
     const existingTenant = await tenantModel.findUnique({
@@ -85,7 +91,6 @@ export async function updateWebhookHandler(
         name: true,
         webhookUrl: true,
         webhookEventTypes: true,
-        webhookSecret: true,
         updatedAt: true,
       },
     });
@@ -102,10 +107,6 @@ export async function updateWebhookHandler(
           result.data.webhookUrl === undefined
             ? existingTenant.webhookUrl
             : result.data.webhookUrl,
-        webhookSecret:
-          result.data.webhookSecret === undefined
-            ? existingTenant.webhookSecret
-            : result.data.webhookSecret,
         webhookEventTypes:
           result.data.eventTypes === undefined
             ? existingTenant.webhookEventTypes
@@ -116,13 +117,12 @@ export async function updateWebhookHandler(
         name: true,
         webhookUrl: true,
         webhookEventTypes: true,
-        webhookSecret: true,
         updatedAt: true,
       },
     });
 
     res.status(200).json(toWebhookSettingsResponse(tenant));
   } catch (error) {
-    next(error);
+    res.status(500).json({ error: "Failed to update webhook settings" });
   }
 }

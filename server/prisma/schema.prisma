@@ -16,6 +16,7 @@ model Tenant {
   totalCredit        BigInt            @default(0) // Total purchased credit
   webhookUrl         String?
   webhookSecret      String?
+  webhookEventTypes  String?
   apiKeys            ApiKey[]
   webhookDeliveries  WebhookDelivery[]
   quotaTopUps QuotaTopUp[]

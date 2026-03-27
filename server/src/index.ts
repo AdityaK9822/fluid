@@ -3,11 +3,53 @@ import "dotenv/config";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
-
-//  These imports depend on environment variables
+import {
+  listApiKeysHandler,
+  revokeApiKeyHandler,
+  upsertApiKeyHandler,
+} from "./handlers/adminApiKeys";
+import {
+  listWebhookSettingsHandler,
+  updateWebhookSettingsHandler,
+} from "./handlers/adminWebhooks";
+import {
+  addSignerHandler,
+  listSignersHandler,
+  removeSignerHandler,
+} from "./handlers/adminSigners";
+import { feeBumpBatchHandler, feeBumpHandler } from "./handlers/feeBump";
+import {
+  createCheckoutSessionHandler,
+  stripeWebhookHandler,
+} from "./handlers/stripe";
+import {
+  getWebhookSettingsHandler,
+  updateWebhookHandler,
+} from "./handlers/tenantWebhook";
+import { getHorizonFailoverClient, initializeHorizonFailoverClient } from "./horizon/failoverClient";
+import { AppError } from "./errors/AppError";
+import { apiKeyMiddleware } from "./middleware/apiKeys";
+import {
+  createGlobalErrorHandler,
+  notFoundHandler,
+} from "./middleware/errorHandler";
+import { apiKeyRateLimit } from "./middleware/rateLimit";
+import { AlertService } from "./services/alertService";
+import {
+  hydratePersistedSigners,
+  listAdminSigners,
+} from "./services/signerRegistry";
+import {
+  loadSlackNotifierOptionsFromEnv,
+  SlackNotifier,
+} from "./services/slackNotifier";
+import { createLogger, serializeError } from "./utils/logger";
+import redisClient from "./utils/redis";
+import { RedisRateLimitStore } from "./utils/redisRateLimitStore";
 import { loadConfig } from "./config";
-import { feeBumpHandler } from "./handlers/feeBump";
-import { updateWebhookHandler } from "./handlers/tenantWebhook";
+import { initializeBalanceMonitor } from "./workers/balanceMonitor";
+import { getLedgerMonitor, initializeLedgerMonitor } from "./workers/ledgerMonitor";
+import { transactionStore } from "./workers/transactionStore";
 import { healthHandler } from "./handlers/health";
 
 // import { apiKeyMiddleware } from "./middleware/apiKeys";
@@ -89,7 +131,22 @@ app.post(
 // Tenant Webhook Management
 app.patch("/tenant/webhook", authMiddleware, updateWebhookHandler);
 
-// --- Test Routes ---
+app.get(
+  "/tenant/webhook-settings",
+  apiKeyMiddleware,
+  (req: Request, res: Response, next: NextFunction) => {
+    void getWebhookSettingsHandler(req, res, next);
+  },
+);
+
+app.patch(
+  "/tenant/webhook-settings",
+  apiKeyMiddleware,
+  (req: Request, res: Response, next: NextFunction) => {
+    void updateWebhookHandler(req, res, next);
+  },
+);
+
 app.post("/test/add-transaction", (req: Request, res: Response) => {
   const { hash, status = "pending" } = req.body;
   if (!hash) return res.status(400).json({ error: "Transaction hash required" });
@@ -101,7 +158,44 @@ app.get("/test/transactions", (req: Request, res: Response) => {
   res.json({ transactions: transactionStore.getAllTransactions() });
 });
 
-//  Error Handling 
+app.post(
+  "/test/alerts/low-balance",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!alertService.isEnabled()) {
+        res.status(400).json({
+          error:
+            "No alert transport configured. Set Slack webhook or SMTP env vars first.",
+        });
+        return;
+      }
+
+      await alertService.sendTestAlert(config);
+      res.json({ message: "Test low-balance alert sent" });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+app.get("/admin/api-keys", listApiKeysHandler);
+app.post("/admin/api-keys", upsertApiKeyHandler);
+app.patch("/admin/api-keys/:key/revoke", revokeApiKeyHandler);
+app.delete("/admin/api-keys/:key", revokeApiKeyHandler);
+app.get("/admin/webhooks", listWebhookSettingsHandler);
+app.patch("/admin/webhooks/:tenantId", updateWebhookSettingsHandler);
+app.get("/admin/signers", listSignersHandler(config));
+app.post("/admin/signers", addSignerHandler(config));
+app.delete("/admin/signers/:publicKey", removeSignerHandler(config));
+
+app.post(
+  "/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  stripeWebhookHandler,
+);
+app.post("/create-checkout-session", createCheckoutSessionHandler);
+
+ 
 app.use(notFoundHandler);
 app.use(createGlobalErrorHandler(slackNotifier));
 

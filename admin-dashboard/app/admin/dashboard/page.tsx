@@ -96,6 +96,12 @@ export default async function AdminDashboard() {
         <section className="mt-6 space-y-6">
           <div className="flex flex-wrap justify-end gap-3">
             <Link
+              href="/admin/webhooks"
+              className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            >
+              Webhook settings
+            </Link>
+            <Link
               href="/admin/signers"
               className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
             >

@@ -54,6 +54,16 @@ export interface ApiKey {
   updatedAt: string;
 }
 
+export type WebhookEventType = "tx.success" | "tx.failed" | "balance.low";
+
+export interface WebhookTenantSettings {
+  tenantId: string;
+  tenantName: string | null;
+  webhookUrl: string | null;
+  eventTypes: WebhookEventType[];
+  updatedAt: string | null;
+}
+
 export type TransactionHistorySort =
   | "time_desc"
   | "time_asc"
