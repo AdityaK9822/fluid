@@ -1,4 +1,5 @@
-import { AlertEmailConfig, AlertingConfig, Config } from "../config";
+import type { AlertEmailConfig, AlertingConfig, Config } from "../config";
+import { SlackNotifier, type SlackNotifierLike } from "./slackNotifier";
 
 type NodeMailerModule = {
   createTransport: (config: {
@@ -34,10 +35,15 @@ interface AlertState {
 export class AlertService {
   private readonly state = new Map<string, AlertState>();
 
-  constructor(private readonly config: AlertingConfig) {}
+  constructor(
+    private readonly config: AlertingConfig,
+    private readonly slackNotifier: SlackNotifierLike = new SlackNotifier({
+      webhookUrl: config.slackWebhookUrl,
+    }),
+  ) {}
 
   isEnabled(): boolean {
-    return Boolean(this.config.slackWebhookUrl || this.config.email);
+    return Boolean(this.config.email) || this.slackNotifier.isConfigured();
   }
 
   async sendLowBalanceAlert(payload: LowBalanceAlertPayload): Promise<boolean> {
@@ -96,8 +102,14 @@ export class AlertService {
   private async notifyAdmins(payload: LowBalanceAlertPayload): Promise<void> {
     const tasks: Array<Promise<void>> = [];
 
-    if (this.config.slackWebhookUrl) {
-      tasks.push(this.sendSlackAlert(payload));
+    if (this.slackNotifier.isEnabled("low_balance")) {
+      tasks.push(
+        this.slackNotifier.notifyLowBalance(payload).then((sent) => {
+          if (!sent) {
+            throw new Error("Slack low-balance alert could not be delivered.");
+          }
+        }),
+      );
     }
 
     if (this.config.email) {
@@ -122,27 +134,6 @@ export class AlertService {
     failures.forEach((failure) => {
       console.error("[AlertService] Alert transport failed:", failure.reason);
     });
-  }
-
-  private async sendSlackAlert(
-    payload: LowBalanceAlertPayload,
-  ): Promise<void> {
-    const response = await fetch(this.config.slackWebhookUrl!, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        text: this.buildPlainTextMessage(payload),
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(
-        `Slack webhook request failed with ${response.status}: ${body}`,
-      );
-    }
   }
 
   private async sendEmailAlert(
