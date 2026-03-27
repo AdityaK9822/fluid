@@ -36,7 +36,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.17.2",
     "@prisma/adapter-better-sqlite3": "^7.5.0",
+    "@prisma/adapter-libsql": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@stellar/stellar-sdk": "^11.3.0",
     "bullmq": "^5.71.1",
