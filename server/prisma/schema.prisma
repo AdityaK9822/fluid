@@ -17,6 +17,7 @@ model Tenant {
   webhookUrl         String?
   apiKeys            ApiKey[]
   webhookDeliveries  WebhookDelivery[]
+  quotaTopUps QuotaTopUp[]
   payments           Payment[]
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
@@ -52,6 +53,21 @@ model WebhookDelivery {
 
   @@index([status])
   @@index([tenantId])
+}
+
+model QuotaTopUp {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+  stripeSessionId String   @unique
+  amountCents     Int
+  quotaStroops    BigInt
+  status          String   @default("pending") // pending, fulfilled, failed
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([status])
 }
 
 model SupportedAsset {

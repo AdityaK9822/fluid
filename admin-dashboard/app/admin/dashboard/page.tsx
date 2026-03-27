@@ -7,6 +7,7 @@ import {
 import { getDashboardPageData } from "@/lib/dashboard-data";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { UsageLeaderboard } from "@/components/dashboard/UsageLeaderboard";
+import { BillingTopUp } from "@/components/dashboard/BillingTopUp";
 import { getTenantLeaderboard } from "@/lib/transaction-history";
 import { SpendChart } from "@/components/dashboard/SpendChart";
 import { Coins, CheckCircle, Wallet, Zap, KeyRound } from "lucide-react";
@@ -110,6 +111,10 @@ export default async function AdminDashboard() {
           <TransactionsTable transactions={transactions} />
           <SignersTable signers={signers} />
           <UsageLeaderboard rows={tenantUsage} />
+        </section>
+
+        <section className="mt-6">
+          <BillingTopUp tenantId={session?.user?.email ?? "default"} />
         </section>
       </main>
     </div>

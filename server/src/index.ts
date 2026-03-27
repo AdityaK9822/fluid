@@ -29,6 +29,7 @@ import {
   removeSignerHandler,
 } from "./handlers/adminSigners";
 import { globalErrorHandler, notFoundHandler } from "./middleware/errorHandler";
+import { createCheckoutSessionHandler, stripeWebhookHandler } from "./handlers/stripe";
 import { apiKeyRateLimit } from "./middleware/rateLimit";
 import { AlertService } from "./services/alertService";
 import { hydratePersistedSigners, listAdminSigners } from "./services/signerRegistry";
@@ -215,6 +216,11 @@ app.delete("/admin/api-keys/:key", revokeApiKeyHandler);
 app.get("/admin/signers", listSignersHandler(config));
 app.post("/admin/signers", addSignerHandler(config));
 app.delete("/admin/signers/:publicKey", removeSignerHandler(config));
+
+// Stripe billing
+// Webhook must use raw body — register before express.json() parses it
+app.post("/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.post("/create-checkout-session", createCheckoutSessionHandler);
 
 // 404 - must come after all routes
 app.use(notFoundHandler);
