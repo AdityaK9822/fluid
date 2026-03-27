@@ -1,0 +1,11 @@
+CREATE TABLE IF NOT EXISTS "DiscordMilestone" (
+  "threshold" INTEGER NOT NULL PRIMARY KEY,
+  "status" TEXT NOT NULL,
+  "attemptCount" INTEGER NOT NULL DEFAULT 0,
+  "totalTransactions" INTEGER NOT NULL,
+  "totalFeeStroops" BIGINT NOT NULL,
+  "lastAttemptAt" DATETIME,
+  "firedAt" DATETIME,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

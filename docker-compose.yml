@@ -1,0 +1,102 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: fluid-postgres
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-fluid}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-fluid_pass}"
+      POSTGRES_DB: "${POSTGRES_DB:-fluid_db}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fluid} -d ${POSTGRES_DB:-fluid_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fluid-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: fluid-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fluid-network
+
+  rust-engine:
+    build:
+      context: ./fluid-server
+      dockerfile: Dockerfile
+    container_name: fluid-rust-engine
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-fluid}:${POSTGRES_PASSWORD:-fluid_pass}@postgres:5432/${POSTGRES_DB:-fluid_db}"
+      FLUID_FEE_PAYER_SECRET: "${FLUID_FEE_PAYER_SECRET}"
+      STELLAR_HORIZON_URL: "${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}"
+      STELLAR_NETWORK_PASSPHRASE: "${STELLAR_NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
+      PORT: "3000"
+      FLUID_ALLOWED_ORIGINS: "*"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - fluid-network
+
+  node-api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: fluid-node-api
+    environment:
+      PORT: "3001"
+      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-fluid}:${POSTGRES_PASSWORD:-fluid_pass}@postgres:5432/${POSTGRES_DB:-fluid_db}"
+      FLUID_FEE_PAYER_SECRET: "${FLUID_FEE_PAYER_SECRET}"
+      STELLAR_HORIZON_URL: "${STELLAR_HORIZON_URL:-https://horizon-testnet.stellar.org}"
+      STELLAR_NETWORK_PASSPHRASE: "${STELLAR_NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
+      FLUID_ALLOWED_ORIGINS: "*"
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - fluid-network
+
+  dashboard:
+    build:
+      context: ./admin-dashboard
+      dockerfile: Dockerfile
+    container_name: fluid-dashboard
+    environment:
+      PORT: "3002"
+      AUTH_SECRET: "${AUTH_SECRET:-random_secret_for_dev_only}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@fluid.dev}"
+      ADMIN_PASSWORD_HASH: "${ADMIN_PASSWORD_HASH:-$2a$12$R.S6/e8G4U3ZJmBf6Bf6Bf6Bf6Bf6Bf6Bf6Bf6Bf6Bf6Bf6Bf6B}"
+      NEXTAUTH_URL: "http://localhost:3002"
+      FLUID_SERVER_URL: "http://rust-engine:3000"
+    ports:
+      - "3002:3002"
+    depends_on:
+      - rust-engine
+    networks:
+      - fluid-network
+
+networks:
+  fluid-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

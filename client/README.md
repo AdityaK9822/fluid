@@ -89,6 +89,8 @@ new FluidClient(config: {
   networkPassphrase: string;
   horizonUrl?: string;
   sorobanRpcUrl?: string;
+  enableTelemetry?: boolean; // Enable anonymous telemetry (default: false)
+  telemetryEndpoint?: string; // Custom telemetry endpoint (default: 'https://telemetry.fluid.dev/ping')
 })
 ```
 
@@ -109,6 +111,46 @@ const { requestFeeBump, isLoading, error, result } = useFeeBump(client);
 - `isLoading` is `true` while the request is in flight
 - `error` contains the last thrown error, if any
 - `result` contains the latest successful fee-bump response
+
+## Anonymous Usage Telemetry
+
+The Fluid SDK includes an optional, anonymous telemetry system to help maintainers understand SDK usage patterns.
+
+**Telemetry is disabled by default (opt-in).**
+
+### What is Collected?
+
+When enabled, the SDK sends a single daily ping with:
+
+- `sdk_version`: The installed package version
+- `domain`: `window.location.hostname` (no path, no query params)
+- `timestamp`: UTC date (day-level precision only)
+
+**No personal data, transaction data, or wallet addresses are collected.**
+
+### How to Enable Telemetry
+
+```typescript
+const client = new FluidClient({
+  serverUrl: "http://localhost:3000",
+  networkPassphrase: StellarSdk.Networks.TESTNET,
+  enableTelemetry: true, // Enable anonymous telemetry
+});
+```
+
+### How to Disable Telemetry
+
+Telemetry is disabled by default. To explicitly disable it:
+
+```typescript
+const client = new FluidClient({
+  serverUrl: "http://localhost:3000",
+  networkPassphrase: StellarSdk.Networks.TESTNET,
+  enableTelemetry: false, // Explicitly disable (this is the default)
+});
+```
+
+For more details, see [TELEMETRY.md](TELEMETRY.md).
 
 ## Development
 

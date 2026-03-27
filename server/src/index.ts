@@ -1,5 +1,6 @@
+import "dotenv/config";
+
 import cors from "cors";
-import dotenv from "dotenv";
 import express, { NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { loadConfig } from "./config";
@@ -38,38 +39,42 @@ import {
   getLedgerMonitor,
   initializeLedgerMonitor,
 } from "./workers/ledgerMonitor";
+import { initializeIncidentMonitor } from "./workers/incidentMonitor";
 import { transactionStore } from "./workers/transactionStore";
+import { healthHandler } from "./handlers/health";
 
 dotenv.config();
 
-const logger = createLogger({ component: "server" });
 const app = express();
-
-// Stripe webhook needs raw body for signature verification
-app.post(
-  "/webhooks/stripe",
-  express.raw({ type: "application/json" }),
-  stripeWebhookHandler
-);
-
-// JSON parsing for all other routes
 app.use(express.json());
 
 const config = loadConfig();
-const alertService = new AlertService(config.alerting);
+const slackNotifier = new SlackNotifier(loadSlackNotifierOptionsFromEnv());
+const pagerDutyNotifier = new PagerDutyNotifier();
+const fcmNotifier = initializeFcmNotifier();
+if (fcmNotifier.isConfigured()) {
+  logger.info("FCM push notifications enabled");
+} else {
+  logger.info("FCM push notifications disabled - FCM_PROJECT_ID/FCM_CLIENT_EMAIL/FCM_PRIVATE_KEY not set");
+}
+const alertService = new AlertService(config.alerting, slackNotifier, { fcmNotifier });
 
+// Use Redis-backed store for global IP rate limiting. Falls back to memory store if Redis unavailable.
 const windowSeconds = Math.max(1, Math.ceil(config.rateLimitWindowMs / 1000));
-let limiterStore: unknown;
+let limiterStore: any = undefined;
 try {
+  // Prefer a maintained adapter if available: rate-limit-redis
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const RateLimitRedis = require("rate-limit-redis");
   const RedisStore = RateLimitRedis.default || RateLimitRedis;
+  // Many adapters accept `client` for an ioredis instance and `expiry` or `windowMs`.
   limiterStore = new RedisStore({ client: redisClient, expiry: windowSeconds });
-} catch {
+} catch (err) {
+  // Fallback to the lightweight custom store we added earlier
   try {
     limiterStore = new RedisRateLimitStore(redisClient, windowSeconds);
-  } catch (error) {
-    logger.error({ ...serializeError(error) }, "Failed to initialize rate-limit store");
+  } catch (innerErr) {
+    console.error("Failed to initialize Redis rate-limit store:", innerErr);
   }
 }
 
@@ -82,7 +87,7 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  store: limiterStore as any,
+  store: limiterStore,
 });
 
 const corsOptions = {
@@ -95,7 +100,10 @@ const corsOptions = {
       return;
     }
 
-    if (config.allowedOrigins.length === 0 || config.allowedOrigins.includes(origin)) {
+    if (
+      config.allowedOrigins.length === 0 ||
+      config.allowedOrigins.includes(origin)
+    ) {
       callback(null, true);
       return;
     }
@@ -114,46 +122,43 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   next(err);
 });
 
-app.get("/health", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const signers = await listAdminSigners(config);
-    res.json({
-      status: "ok",
-      fee_payers: signers.map((account) => ({
-        publicKey: account.publicKey,
-        status: account.status,
-        in_flight: account.inFlight,
-        total_uses: account.totalUses,
-        sequence_number: account.sequenceNumber,
-        balance: account.balance,
-        source: account.source,
+app.get("/health", (req: Request, res: Response) => {
+  const accounts = config.signerPool.getSnapshot().map((account) => ({
+    publicKey: account.publicKey,
+    status: account.active ? "active" : "inactive",
+    in_flight: account.inFlight,
+    total_uses: account.totalUses,
+    sequence_number: account.sequenceNumber,
+    balance: account.balance,
+  }));
+
+  res.json({
+    status: "ok",
+    fee_payers: accounts,
+    horizon_nodes:
+      getHorizonFailoverClient()?.getNodeStatuses() ??
+      getLedgerMonitor()?.getNodeStatuses() ??
+      config.horizonUrls.map((url) => ({
+        url,
+        state: "Active",
+        consecutiveFailures: 0,
       })),
-      horizon_nodes:
-        getHorizonFailoverClient()?.getNodeStatuses() ??
-        getLedgerMonitor()?.getNodeStatuses() ??
-        config.horizonUrls.map((url) => ({
-          url,
-          state: "Active",
-          consecutiveFailures: 0,
-        })),
-      total: signers.length,
-      low_balance_alerting: {
-        enabled:
-          config.alerting.lowBalanceThresholdXlm !== undefined &&
-          alertService.isEnabled() &&
-          Boolean(config.horizonUrl),
-        threshold_xlm: config.alerting.lowBalanceThresholdXlm ?? null,
-        check_interval_ms: config.alerting.checkIntervalMs,
-        cooldown_ms: config.alerting.cooldownMs,
-        slack_configured: Boolean(config.alerting.slackWebhookUrl),
-        email_configured: Boolean(config.alerting.email),
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
+    total: accounts.length,
+    low_balance_alerting: {
+      enabled:
+        config.alerting.lowBalanceThresholdXlm !== undefined &&
+        alertService.isEnabled() &&
+        Boolean(config.horizonUrl),
+      threshold_xlm: config.alerting.lowBalanceThresholdXlm ?? null,
+      check_interval_ms: config.alerting.checkIntervalMs,
+      cooldown_ms: config.alerting.cooldownMs,
+      slack_configured: Boolean(config.alerting.slackWebhookUrl),
+      email_configured: Boolean(config.alerting.email),
+    },
+  });
 });
 
+// Fee bump endpoint
 app.post(
   "/fee-bump",
   apiKeyMiddleware,
@@ -189,24 +194,28 @@ app.post("/test/add-transaction", (req: Request, res: Response) => {
 });
 
 app.get("/test/transactions", (req: Request, res: Response) => {
-  res.json({ transactions: transactionStore.getAllTransactions() });
+  const transactions = transactionStore.getAllTransactions();
+  res.json({ transactions });
 });
 
-app.post("/test/alerts/low-balance", async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    if (!alertService.isEnabled()) {
-      res.status(400).json({
-        error: "No alert transport configured. Set Slack webhook or SMTP env vars first.",
-      });
-      return;
+app.post(
+  "/test/alerts/low-balance",
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!alertService.isEnabled()) {
+        return res.status(400).json({
+          error:
+            "No alert transport configured. Set Slack webhook or SMTP env vars first.",
+        });
+      }
+
+      await alertService.sendTestAlert(config);
+      res.json({ message: "Test low-balance alert sent" });
+    } catch (error) {
+      next(error);
     }
-
-    await alertService.sendTestAlert(config);
-    res.json({ message: "Test low-balance alert sent" });
-  } catch (error) {
-    next(error);
-  }
-});
+  },
+);
 
 app.get("/admin/api-keys", listApiKeysHandler);
 app.post("/admin/api-keys", upsertApiKeyHandler);
@@ -217,118 +226,98 @@ app.patch("/admin/tenants/:tenantId/subscription-tier", updateTenantSubscription
 app.get("/admin/signers", listSignersHandler(config));
 app.post("/admin/signers", addSignerHandler(config));
 app.delete("/admin/signers/:publicKey", removeSignerHandler(config));
+app.get("/admin/device-tokens", listDeviceTokensHandler);
+app.post("/admin/device-tokens", registerDeviceTokenHandler);
+app.delete("/admin/device-tokens/:id", deleteDeviceTokenHandler);
 
-// Stripe billing
-// Webhook must use raw body — register before express.json() parses it
-app.post("/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.post(
+  "/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  stripeWebhookHandler,
+);
 app.post("/create-checkout-session", createCheckoutSessionHandler);
 
-// 404 - must come after all routes
 app.use(notFoundHandler);
-app.use(globalErrorHandler);
+app.use(createGlobalErrorHandler(slackNotifier));
 
 const PORT = process.env.PORT || 3000;
 
-async function bootstrap(): Promise<void> {
+let ledgerMonitor: ReturnType<typeof initializeLedgerMonitor> | null = null;
+let balanceMonitor: ReturnType<typeof initializeBalanceMonitor> | null = null;
+let incidentMonitor: ReturnType<typeof initializeIncidentMonitor> | null = null;
+let shuttingDown = false;
+let server: ReturnType<typeof app.listen> | null = null;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  await slackNotifier.notifyServerLifecycle({
+    detail: `Signal received: ${signal}`,
+    phase: "stop",
+    timestamp: new Date(),
+  });
+
+  ledgerMonitor?.stop();
+  balanceMonitor?.stop();
+  incidentMonitor?.stop();
+
+  if (server) {
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2_000).unref();
+    return;
+  }
+
+  process.exit(0);
+}
+
+// --- Background Workers ---
+let ledgerMonitorInstance: any = null;
+if (config.horizonUrls.length > 0) {
   try {
-    await hydratePersistedSigners(config);
+    ledgerMonitorInstance = initializeLedgerMonitor(config);
+    ledgerMonitorInstance.start();
+    logger.info("Ledger monitor worker started");
   } catch (error) {
-    logger.error({ ...serializeError(error) }, "Failed to hydrate persisted signers");
+    logger.error({ ...serializeError(error) }, "Failed to start ledger monitor");
   }
-
-  if (config.horizonUrls.length > 0) {
-    try {
-      const ledgerMonitor = initializeLedgerMonitor(config);
-      ledgerMonitor.start();
-      logger.info("Ledger monitor worker started");
-    } catch (error) {
-      logger.error({ ...serializeError(error) }, "Failed to start ledger monitor");
-    }
-  } else {
-    logger.info("No Horizon URLs configured; ledger monitor disabled");
-  }
-
-  if (
-    config.horizonUrl &&
-    config.alerting.lowBalanceThresholdXlm !== undefined &&
-    alertService.isEnabled()
-  ) {
-    try {
-      const balanceMonitor = initializeBalanceMonitor(config, alertService);
-      balanceMonitor.start();
-      logger.info("Balance monitor worker started");
-    } catch (error) {
-      logger.error({ ...serializeError(error) }, "Failed to start balance monitor");
-    }
-  } else {
-    logger.info(
-      "Low balance alerting disabled - missing Horizon URL, threshold, or alert transport",
-    );
-  }
-
-  app.listen(PORT, () => {
-    logger.info(
-      {
-        fee_payers_loaded: config.feePayerAccounts.length,
-        fee_payer_public_keys: config.feePayerAccounts.map((account) => account.publicKey),
-        horizon_node_count: config.horizonUrls.length,
-        horizon_nodes: config.horizonUrls,
-        horizon_selection_strategy: config.horizonSelectionStrategy,
-        port: PORT,
-        url: `http://0.0.0.0:${PORT}`,
-      },
-      "Fluid server started",
-    );
-  });
+} else {
+  logger.info("No Horizon URLs configured; ledger monitor disabled");
 }
 
-  if (config.horizonUrls.length > 0) {
-    try {
-      const ledgerMonitor = initializeLedgerMonitor(config);
-      ledgerMonitor.start();
-      logger.info("Ledger monitor worker started");
-    } catch (error) {
-      logger.error({ ...serializeError(error) }, "Failed to start ledger monitor");
-    }
-  } else {
-    logger.info("No Horizon URLs configured; ledger monitor disabled");
+if (
+  config.horizonUrl &&
+  config.alerting.lowBalanceThresholdXlm !== undefined &&
+  alertService.isEnabled()
+) {
+  try {
+    balanceMonitor = initializeBalanceMonitor(config, alertService);
+    balanceMonitor.start();
+    logger.info("Balance monitor worker started");
+  } catch (error) {
+    logger.error({ ...serializeError(error) }, "Failed to start balance monitor");
   }
-
-  if (
-    config.horizonUrl &&
-    config.alerting.lowBalanceThresholdXlm !== undefined &&
-    alertService.isEnabled()
-  ) {
-    try {
-      const balanceMonitor = initializeBalanceMonitor(config, alertService);
-      balanceMonitor.start();
-      logger.info("Balance monitor worker started");
-    } catch (error) {
-      logger.error({ ...serializeError(error) }, "Failed to start balance monitor");
-    }
-  } else {
-    logger.info(
-      "Low balance alerting disabled - missing Horizon URL, threshold, or alert transport",
-    );
-  }
-
-  app.listen(PORT, () => {
-    logger.info(
-      {
-        fee_payers_loaded: config.feePayerAccounts.length,
-        fee_payer_public_keys: config.feePayerAccounts.map((account) => account.publicKey),
-        horizon_node_count: config.horizonUrls.length,
-        horizon_nodes: config.horizonUrls,
-        horizon_selection_strategy: config.horizonSelectionStrategy,
-        port: PORT,
-        url: `http://0.0.0.0:${PORT}`,
-      },
-      "Fluid server started",
-    );
-  });
+} else {
+  logger.info(
+    "Low balance alerting disabled - missing Horizon URL, threshold, or alert transport",
+  );
 }
 
-app.listen(PORT, () => {
+if (pagerDutyNotifier.isConfigured() || fcmNotifier.isConfigured()) {
+  try {
+    incidentMonitor = initializeIncidentMonitor(config, pagerDutyNotifier, {}, fcmNotifier);
+    incidentMonitor.start();
+    logger.info("Incident monitor worker started");
+  } catch (error) {
+    logger.error({ ...serializeError(error) }, "Failed to start incident monitor");
+  }
+} else {
+  logger.info("PagerDuty incident alerting disabled - routing key not set");
+}
+
+server = app.listen(PORT, () => {
   logger.info(
     {
       fee_payers_loaded: config.feePayerAccounts.length,
@@ -344,4 +333,3 @@ app.listen(PORT, () => {
     "Fluid server started",
   );
 });
-void bootstrap();

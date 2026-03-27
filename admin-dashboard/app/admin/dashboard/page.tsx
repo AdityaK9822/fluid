@@ -48,6 +48,10 @@ export default async function AdminDashboard() {
                     : "Sample dashboard data"}
                 </div>
               </div>
+              <ConnectDeviceDialog
+                serverUrl={fluidServerUrl}
+                adminToken={fluidAdminToken}
+              />
               <form action="/api/auth/signout" method="POST">
                 <button
                   type="submit"
@@ -98,6 +102,12 @@ export default async function AdminDashboard() {
         {/* Tables */}
         <section className="mt-6 space-y-6">
           <div className="flex flex-wrap justify-end gap-3">
+            <Link
+              href="/admin/webhooks"
+              className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+            >
+              Webhook settings
+            </Link>
             <Link
               href="/admin/signers"
               className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"

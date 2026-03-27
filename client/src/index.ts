@@ -11,6 +11,11 @@ import {
   resolveStellarSdk,
   toTransactionXdr,
 } from "./stellarCompatibility";
+import {
+  collectTelemetry,
+  getTelemetryConfig,
+  TelemetryConfig,
+} from "./telemetry";
 
 dotenv.config();
 
@@ -22,6 +27,24 @@ export interface FluidClientConfig {
   sorobanRpcUrl?: string;
   useWorker?: boolean; // New option to enable Web Worker for signing operations
   stellarSdk?: unknown;
+  /**
+   * Enable anonymous usage telemetry.
+   * Default: false (opt-in)
+   * 
+   * When enabled, the SDK will send a single daily ping with:
+   * - sdk_version: The installed package version
+   * - domain: window.location.hostname (no path, no query params)
+   * - timestamp: UTC date (day-level precision only)
+   * 
+   * No personal data, transaction data, or wallet addresses are collected.
+   * Telemetry is fire-and-forget and never blocks SDK functionality.
+   */
+  enableTelemetry?: boolean;
+  /**
+   * Custom telemetry endpoint URL.
+   * Default: 'https://telemetry.fluid.dev/ping'
+   */
+  telemetryEndpoint?: string;
 }
 
 export interface FeeBumpResponse {
@@ -98,6 +121,13 @@ export class FluidClient {
     if (config.sorobanRpcUrl) {
       this.sorobanServer = new SorobanRpc.Server(config.sorobanRpcUrl);
     }
+
+    // Initialize telemetry if enabled
+    const telemetryConfig = getTelemetryConfig({
+      enabled: config.enableTelemetry,
+      endpoint: config.telemetryEndpoint,
+    });
+    collectTelemetry(telemetryConfig);
   }
 
   private normalizeServerUrls(config: FluidClientConfig): string[] {
@@ -492,6 +522,13 @@ export class FluidClient {
 }
 
 export * from "./soroban";
+export {
+  collectTelemetry,
+  createTelemetryCollector,
+  isTelemetryEnabled,
+  getTelemetryConfig,
+} from "./telemetry";
+export type { TelemetryConfig, TelemetryData } from "./telemetry";
   // New method for performance testing
   async signMultipleTransactions(
     transactions: any[],

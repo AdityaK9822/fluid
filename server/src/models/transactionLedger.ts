@@ -7,6 +7,11 @@ export interface SponsoredTransactionRecord {
   createdAt: Date;
 }
 
+export interface SponsoredTransactionTotals {
+  totalFeeStroops: number;
+  totalTransactions: number;
+}
+
 function getUtcDayRange(date: Date): { start: Date; end: Date } {
   const start = new Date(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())

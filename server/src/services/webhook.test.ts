@@ -1,12 +1,8 @@
 import * as fc from "fast-check";
-
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-import { WebhookService } from "./webhook";
+import { WebhookService, signWebhookPayload, webhookLogger } from "./webhook";
 import prisma from "../utils/db";
-import { webhookLogger } from "./webhook";
 
-// Mock Prisma before importing WebhookService
 vi.mock("../utils/db", () => ({
   default: {
     tenant: {
@@ -15,7 +11,6 @@ vi.mock("../utils/db", () => ({
   },
 }));
 
-
 const mockPrisma = prisma as any;
 
 describe("WebhookService", () => {
@@ -23,12 +18,14 @@ describe("WebhookService", () => {
 
   beforeEach(() => {
     service = new WebhookService();
+    vi.restoreAllMocks();
     vi.clearAllMocks();
-    // Reset global fetch mock
+    vi.spyOn(webhookLogger, "debug").mockImplementation(() => webhookLogger);
+    vi.spyOn(webhookLogger, "info").mockImplementation(() => webhookLogger);
     vi.stubGlobal("fetch", vi.fn());
   });
 
-  describe("dispatch — tenant not found", () => {
+  describe("dispatch - tenant not found", () => {
     it("logs a warning and skips dispatch when tenant is not found", async () => {
       mockPrisma.tenant.findUnique.mockResolvedValue(null);
       const warnSpy = vi.spyOn(webhookLogger, "warn").mockImplementation(() => webhookLogger);
@@ -41,11 +38,13 @@ describe("WebhookService", () => {
     });
   });
 
-  describe("dispatch — webhookUrl is null", () => {
+  describe("dispatch - webhookUrl is null", () => {
     it("skips HTTP call when tenant has no webhookUrl", async () => {
       mockPrisma.tenant.findUnique.mockResolvedValue({
         id: "tenant-1",
+        webhookSecret: "tenant-secret",
         webhookUrl: null,
+        webhookEventTypes: null,
       });
 
       await service.dispatch("tenant-1", "hash-abc", "success");
@@ -53,15 +52,7 @@ describe("WebhookService", () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    /**
-     * Property 3: Dispatch is skipped when webhookUrl is null
-     * Validates: Requirements 3.3
-     * Feature: tenant-webhooks, Property 3: Dispatch is skipped when webhookUrl is null
-     *
-     * For any (hash, status) pair where the tenant has webhookUrl = null,
-     * dispatch should make zero outbound HTTP requests.
-     */
-    it("makes zero HTTP calls for any (hash, status) when webhookUrl is null", async () => {
+    it("makes zero HTTP calls for any input when webhookUrl is null", async () => {
       await fc.assert(
         fc.asyncProperty(
           fc.string({ minLength: 1 }),
@@ -72,7 +63,9 @@ describe("WebhookService", () => {
 
             mockPrisma.tenant.findUnique.mockResolvedValue({
               id: "tenant-null",
+              webhookSecret: "tenant-secret",
               webhookUrl: null,
+              webhookEventTypes: null,
             });
 
             await service.dispatch("tenant-null", hash, status);
@@ -85,11 +78,13 @@ describe("WebhookService", () => {
     });
   });
 
-  describe("dispatch — successful delivery", () => {
-    it("POSTs JSON payload to webhookUrl", async () => {
+  describe("dispatch - successful delivery", () => {
+    it("POSTs JSON payload with the Fluid signature header", async () => {
       mockPrisma.tenant.findUnique.mockResolvedValue({
         id: "tenant-1",
+        webhookSecret: "tenant-secret",
         webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: null,
       });
       const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       vi.stubGlobal("fetch", mockFetch);
@@ -101,18 +96,18 @@ describe("WebhookService", () => {
       expect(url).toBe("https://example.com/webhook");
       expect(options.method).toBe("POST");
       expect(options.headers["Content-Type"]).toBe("application/json");
+      expect(options.headers["X-Fluid-Signature-256"]).toBe(
+        signWebhookPayload("tenant-secret", options.body)
+      );
+
       const body = JSON.parse(options.body);
-      expect(body).toEqual({ hash: "hash-xyz", status: "success" });
+      expect(body).toEqual({
+        eventType: "tx.success",
+        hash: "hash-xyz",
+        status: "success",
+      });
     });
 
-    /**
-     * Property 4: Webhook payload contains hash and status
-     * Validates: Requirements 3.2
-     * Feature: tenant-webhooks, Property 4: Webhook payload contains hash and status
-     *
-     * For any (hash, status) pair with a registered webhookUrl, the intercepted
-     * POST body should equal { hash, status }.
-     */
     it("dispatched payload contains exactly hash and status for any input", async () => {
       await fc.assert(
         fc.asyncProperty(
@@ -124,26 +119,127 @@ describe("WebhookService", () => {
 
             mockPrisma.tenant.findUnique.mockResolvedValue({
               id: "tenant-1",
+              webhookSecret: "tenant-secret",
               webhookUrl: "https://example.com/hook",
+              webhookEventTypes: null,
             });
 
             await service.dispatch("tenant-1", hash, status);
 
-            if (mockFetch.mock.calls.length !== 1) return false;
+            if (mockFetch.mock.calls.length !== 1) {
+              return false;
+            }
+
             const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-            return body.hash === hash && body.status === status && Object.keys(body).length === 2;
+            return (
+              body.hash === hash &&
+              body.status === status &&
+              body.eventType === (status === "success" ? "tx.success" : "tx.failed") &&
+              Object.keys(body).length === 3
+            );
           }
         ),
         { numRuns: 100 }
       );
     });
+
+    it("signs the exact serialized JSON body with HMAC-SHA256", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.string({ minLength: 1 }),
+          fc.constantFrom("success" as const, "failed" as const),
+          fc.string({ minLength: 1 }),
+          async (hash, status, secret) => {
+            const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+            vi.stubGlobal("fetch", mockFetch);
+
+            mockPrisma.tenant.findUnique.mockResolvedValue({
+              id: "tenant-1",
+              webhookSecret: secret,
+              webhookUrl: "https://example.com/hook",
+              webhookEventTypes: null,
+            });
+
+            await service.dispatch("tenant-1", hash, status);
+
+            if (mockFetch.mock.calls.length !== 1) {
+              return false;
+            }
+
+            const [, options] = mockFetch.mock.calls[0];
+            return (
+              options.headers["X-Fluid-Signature-256"] ===
+              signWebhookPayload(secret, options.body)
+            );
+          }
+        ),
+        { numRuns: 100 }
+      );
+    });
+
+    it("defaults to all event types when no explicit filter is configured", async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-default",
+        webhookSecret: "tenant-secret",
+        webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: null,
+      });
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal("fetch", mockFetch);
+
+      await service.dispatch("tenant-default", "hash-default", "failed");
+
+      expect(mockFetch).toHaveBeenCalledOnce();
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.eventType).toBe("tx.failed");
+    });
+
+    it("skips dispatch when the tenant disables the event type", async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-filtered",
+        webhookSecret: "tenant-secret",
+        webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: JSON.stringify(["tx.failed"]),
+      });
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal("fetch", mockFetch);
+
+      await service.dispatch("tenant-filtered", "hash-filtered", "success");
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 
-  describe("dispatch — error handling", () => {
+  describe("dispatch - error handling", () => {
+    it("logs and skips dispatch when the tenant has no webhook secret", async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        id: "tenant-1",
+        webhookSecret: null,
+        webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: null,
+      });
+      const errorSpy = vi.spyOn(webhookLogger, "error").mockImplementation(() => webhookLogger);
+
+      await service.dispatch("tenant-1", "hash-missing-secret", "success");
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenant_id: "tenant-1",
+          tx_hash: "hash-missing-secret",
+          webhook_url: "https://example.com/webhook",
+        }),
+        "Tenant has no webhook secret configured; refusing unsigned webhook dispatch"
+      );
+      errorSpy.mockRestore();
+    });
+
     it("logs error and does not throw on non-2xx response", async () => {
       mockPrisma.tenant.findUnique.mockResolvedValue({
         id: "tenant-1",
+        webhookSecret: "tenant-secret",
         webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: null,
       });
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
       const errorSpy = vi.spyOn(webhookLogger, "error").mockImplementation(() => webhookLogger);
@@ -156,7 +252,9 @@ describe("WebhookService", () => {
     it("logs error and does not throw on network error", async () => {
       mockPrisma.tenant.findUnique.mockResolvedValue({
         id: "tenant-1",
+        webhookSecret: "tenant-secret",
         webhookUrl: "https://example.com/webhook",
+        webhookEventTypes: null,
       });
       vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network failure")));
       const errorSpy = vi.spyOn(webhookLogger, "error").mockImplementation(() => webhookLogger);
@@ -166,14 +264,6 @@ describe("WebhookService", () => {
       errorSpy.mockRestore();
     });
 
-    /**
-     * Property 5: LedgerMonitor continues after webhook failure
-     * Validates: Requirements 3.4, 3.5
-     * Feature: tenant-webhooks, Property 5: LedgerMonitor continues after webhook failure
-     *
-     * For any sequence of error conditions (non-2xx or network throws),
-     * dispatch should never throw and always resolve.
-     */
     it("never throws for any error condition", async () => {
       await fc.assert(
         fc.asyncProperty(
@@ -181,7 +271,7 @@ describe("WebhookService", () => {
           fc.constantFrom("success" as const, "failed" as const),
           fc.oneof(
             fc.integer({ min: 400, max: 599 }).map((code) => ({ ok: false, status: code })),
-            fc.constant(null) // null signals network error
+            fc.constant(null)
           ),
           async (hash, status, responseOrNull) => {
             vi.spyOn(webhookLogger, "error").mockImplementation(() => webhookLogger);
@@ -195,10 +285,11 @@ describe("WebhookService", () => {
 
             mockPrisma.tenant.findUnique.mockResolvedValue({
               id: "tenant-1",
+              webhookSecret: "tenant-secret",
               webhookUrl: "https://example.com/hook",
+              webhookEventTypes: null,
             });
 
-            // Should never throw
             await service.dispatch("tenant-1", hash, status);
             return true;
           }

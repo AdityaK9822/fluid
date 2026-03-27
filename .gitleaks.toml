@@ -1,0 +1,5 @@
+[[rules]]
+id = "stellar-secret-key"
+description = "Stellar Secret Key"
+regex = '''S[A-Z0-9]{55}'''
+tags = ["stellar", "secret"]

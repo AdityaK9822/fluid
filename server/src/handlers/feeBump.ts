@@ -9,6 +9,7 @@ import { FeeBumpRequest, FeeBumpSchema, FeeBumpBatchRequest, FeeBumpBatchSchema 
 import { checkTenantDailyQuota } from "../services/quota";
 import { calculateFeeBumpFee } from "../utils/feeCalculator";
 import { MockPriceOracle, validateSlippage } from "../utils/priceOracle";
+import { transactionMilestoneService } from "../services/discordMilestones";
 import { transactionStore } from "../workers/transactionStore";
 
 export interface FeeBumpResponse {
@@ -18,6 +19,14 @@ export interface FeeBumpResponse {
   fee_payer: string;
   submitted_via?: string;
   submission_attempts?: number;
+}
+
+async function maybeNotifyMilestones(): Promise<void> {
+  try {
+    await transactionMilestoneService.checkForMilestones();
+  } catch (error) {
+    console.error("Discord milestone check failed:", error);
+  }
 }
 
 async function processFeeBump(
@@ -79,6 +88,7 @@ async function processFeeBump(
 
   feeBumpTx.sign(feePayerAccount.keypair);
   await recordSponsoredTransaction(tenant.id, feeAmount);
+  await maybeNotifyMilestones();
 
   const feeBumpXdr = feeBumpTx.toXDR();
 
@@ -325,6 +335,7 @@ export async function feeBumpBatchHandler(
 
     feeBumpTx.sign(feePayerAccount.keypair);
     await recordSponsoredTransaction(tenant.id, feeAmount);
+    await maybeNotifyMilestones();
 
     const feeBumpXdr = feeBumpTx.toXDR();
     console.log(

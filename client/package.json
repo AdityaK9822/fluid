@@ -26,6 +26,8 @@
     "build:worker": "tsc src/workers/signingWorker.ts --outDir dist --target ES2020 --module ESNext --lib ES2020,WebWorker,DOM",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    "lint": "echo \"No lint configured\"",
+    "format:check": "echo \"No format check configured\"",
     "docs": "typedoc",
     "test": "vitest run",
     "demo": "python -m http.server 8080",
@@ -51,7 +53,8 @@
     "dotenv": "^16.3.1"
   },
   "peerDependencies": {
-    "react": ">=18"
+    "react": ">=18",
+    "vue": ">=3"
   },
   "devDependencies": {
     "@rolldown/binding-win32-x64-msvc": "^1.0.0-rc.12",
