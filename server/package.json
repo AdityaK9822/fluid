@@ -6,6 +6,8 @@
   "scripts": {
     "build": "npm run native:build && tsc",
     "build:ts": "tsc",
+    "lint": "echo \"No lint configured\"",
+    "format:check": "echo \"No format check configured\"",
     "native:build": "napi build --release",
     "native:build:debug": "napi build",
     "benchmark:signing": "npm run native:build && ts-node src/benchmarks/signing.ts",
