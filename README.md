@@ -65,6 +65,13 @@ cd fluid-server
 cargo test rust_server_handles_static_and_api_without_node --test rust_only_verification -- --nocapture
 ```
 
+Horizon failover verification with reviewer-friendly logs:
+
+```bash
+cd fluid-server
+cargo test retries_failed_submission_on_secondary_node_and_logs_statuses -- --nocapture
+```
+
 Node-vs-Rust parity verification:
 
 ```bash

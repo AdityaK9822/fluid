@@ -5,8 +5,9 @@ fluid/
 |-- fluid-server/         # Primary Rust production server
 |   |-- src/
 |   |   |-- main.rs       # Axum server entry point
+|   |   |-- horizon.rs    # Redundant Horizon/RPC submission client with failover + health tracking
 |   |   |-- stellar.rs    # Fee-bump construction/signing
-|   |   |-- state.rs      # Shared runtime state and failover/rate-limit helpers
+|   |   |-- state.rs      # Shared runtime state and rate-limit/signer helpers
 |   |   |-- config.rs     # Environment mapping
 |   |   |-- error.rs      # API error responses
 |   |   `-- xdr.rs        # Stellar XDR parsing/logging`

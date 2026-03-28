@@ -5,15 +5,14 @@ use std::{
 };
 
 use axum::http::StatusCode;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use stellar_strkey::{ed25519, Strkey};
 use tokio::sync::Mutex;
-use tracing::info;
 
 use crate::{
-    config::{Config, HorizonSelectionStrategy},
+    config::Config,
     error::AppError,
+    horizon::HorizonCluster,
 };
 
 #[derive(Clone)]
@@ -91,16 +90,6 @@ pub struct HealthFeePayer {
     pub total_uses: u64,
 }
 
-#[derive(Clone, Serialize)]
-pub struct HorizonNodeStatus {
-    pub consecutive_failures: u32,
-    pub last_checked_at: Option<String>,
-    pub last_error: Option<String>,
-    pub last_success_at: Option<String>,
-    pub state: &'static str,
-    pub url: String,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TransactionRecord {
     pub created_at: String,
@@ -133,39 +122,6 @@ pub struct RateLimitResult {
     pub limit: u32,
     pub remaining: u32,
     pub reset_time_epoch_seconds: u64,
-}
-
-#[derive(Clone)]
-pub struct HorizonCluster {
-    client: Client,
-    nodes: Arc<Mutex<Vec<HorizonNodeRuntimeState>>>,
-    strategy: HorizonSelectionStrategy,
-}
-
-#[derive(Clone)]
-struct HorizonNodeRuntimeState {
-    consecutive_failures: u32,
-    last_checked_at: Option<String>,
-    last_error: Option<String>,
-    last_success_at: Option<String>,
-    state: &'static str,
-    url: String,
-}
-
-#[derive(Deserialize)]
-struct HorizonSubmitSuccess {
-    hash: String,
-}
-
-#[derive(Deserialize)]
-pub struct HorizonTransactionResponse {
-    pub successful: bool,
-}
-
-pub struct HorizonSubmissionResult {
-    pub attempts: usize,
-    pub hash: String,
-    pub node_url: String,
 }
 
 impl AppState {
@@ -304,217 +260,6 @@ impl RateLimiter {
             remaining: self.max.saturating_sub(entry.count),
             reset_time_epoch_seconds: (entry.reset_time_ms / 1_000) as u64,
         })
-    }
-}
-
-impl HorizonCluster {
-    pub fn new(urls: &[String], strategy: HorizonSelectionStrategy) -> Self {
-        let nodes = urls
-            .iter()
-            .map(|url| HorizonNodeRuntimeState {
-                consecutive_failures: 0,
-                last_checked_at: None,
-                last_error: None,
-                last_success_at: None,
-                state: "Active",
-                url: url.clone(),
-            })
-            .collect();
-
-        Self {
-            client: Client::new(),
-            nodes: Arc::new(Mutex::new(nodes)),
-            strategy,
-        }
-    }
-
-    pub async fn statuses(&self) -> Vec<HorizonNodeStatus> {
-        let guard = self.nodes.lock().await;
-        guard
-            .iter()
-            .map(|node| HorizonNodeStatus {
-                consecutive_failures: node.consecutive_failures,
-                last_checked_at: node.last_checked_at.clone(),
-                last_error: node.last_error.clone(),
-                last_success_at: node.last_success_at.clone(),
-                state: node.state,
-                url: node.url.clone(),
-            })
-            .collect()
-    }
-
-    pub async fn submit_transaction(&self, tx_xdr: &str) -> Result<HorizonSubmissionResult, AppError> {
-        let order = self.node_order().await;
-        let mut last_error = None;
-
-        for (attempt_index, node_index) in order.iter().enumerate() {
-            let node_url = self.node_url(*node_index).await;
-            info!(
-                "[HorizonFailover] Submit attempt {}/{} via {}",
-                attempt_index + 1,
-                order.len(),
-                node_url
-            );
-
-            let response = self
-                .client
-                .post(format!("{node_url}/transactions"))
-                .header("content-type", "application/x-www-form-urlencoded")
-                .body(format!("tx={tx_xdr}"))
-                .send()
-                .await;
-
-            match response {
-                Ok(response) if response.status().is_success() => {
-                    let body: HorizonSubmitSuccess = response.json().await.map_err(|error| {
-                        AppError::new(
-                            StatusCode::BAD_GATEWAY,
-                            "SUBMISSION_FAILED",
-                            format!("Failed to decode Horizon response: {error}"),
-                        )
-                    })?;
-                    self.mark_node_active(*node_index).await;
-
-                    return Ok(HorizonSubmissionResult {
-                        attempts: attempt_index + 1,
-                        hash: body.hash,
-                        node_url,
-                    });
-                }
-                Ok(response) => {
-                    let status = response.status();
-                    let body = response.text().await.unwrap_or_default();
-                    self.mark_node_inactive(*node_index, &body).await;
-                    if matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504) {
-                        last_error = Some(format!("{status}: {body}"));
-                        continue;
-                    }
-
-                    return Err(AppError::new(
-                        StatusCode::BAD_GATEWAY,
-                        "SUBMISSION_FAILED",
-                        format!("Transaction submission failed: {body}"),
-                    ));
-                }
-                Err(error) => {
-                    self.mark_node_inactive(*node_index, &error.to_string()).await;
-                    last_error = Some(error.to_string());
-                }
-            }
-        }
-
-        Err(AppError::new(
-            StatusCode::BAD_GATEWAY,
-            "SUBMISSION_FAILED",
-            format!(
-                "Transaction submission failed: {}",
-                last_error.unwrap_or_else(|| "all Horizon nodes failed".to_string())
-            ),
-        ))
-    }
-
-    pub async fn get_transaction(&self, hash: &str) -> Result<HorizonTransactionResponse, AppError> {
-        let order = self.node_order().await;
-        let mut last_error = None;
-
-        for node_index in order {
-            let node_url = self.node_url(node_index).await;
-            let response = self
-                .client
-                .get(format!("{node_url}/transactions/{hash}"))
-                .send()
-                .await;
-
-            match response {
-                Ok(response) if response.status().is_success() => {
-                    let body = response.json().await.map_err(|error| {
-                        AppError::new(
-                            StatusCode::BAD_GATEWAY,
-                            "SUBMISSION_FAILED",
-                            format!("Failed to decode Horizon transaction lookup: {error}"),
-                        )
-                    })?;
-                    self.mark_node_active(node_index).await;
-                    return Ok(body);
-                }
-                Ok(response) => {
-                    let status = response.status();
-                    let body = response.text().await.unwrap_or_default();
-                    self.mark_node_inactive(node_index, &body).await;
-                    if matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504) {
-                        last_error = Some(body);
-                        continue;
-                    }
-
-                    return Err(AppError::new(
-                        StatusCode::BAD_GATEWAY,
-                        "SUBMISSION_FAILED",
-                        format!("Transaction lookup failed: {body}"),
-                    ));
-                }
-                Err(error) => {
-                    self.mark_node_inactive(node_index, &error.to_string()).await;
-                    last_error = Some(error.to_string());
-                }
-            }
-        }
-
-        Err(AppError::new(
-            StatusCode::BAD_GATEWAY,
-            "SUBMISSION_FAILED",
-            format!(
-                "Transaction lookup failed: {}",
-                last_error.unwrap_or_else(|| "all Horizon nodes failed".to_string())
-            ),
-        ))
-    }
-
-    async fn node_order(&self) -> Vec<usize> {
-        let guard = self.nodes.lock().await;
-        let mut indexes: Vec<usize> = (0..guard.len()).collect();
-
-        match self.strategy {
-            HorizonSelectionStrategy::Priority => {
-                indexes.sort_by_key(|index| if guard[*index].state == "Active" { 0 } else { 1 });
-            }
-            HorizonSelectionStrategy::RoundRobin => {
-                if !indexes.is_empty() {
-                    let len = indexes.len();
-                    indexes.rotate_left((now_ms() as usize) % len);
-                }
-            }
-        }
-
-        indexes
-    }
-
-    async fn node_url(&self, node_index: usize) -> String {
-        let guard = self.nodes.lock().await;
-        guard
-            .get(node_index)
-            .map(|node| node.url.clone())
-            .unwrap_or_default()
-    }
-
-    async fn mark_node_active(&self, node_index: usize) {
-        let mut guard = self.nodes.lock().await;
-        if let Some(node) = guard.get_mut(node_index) {
-            node.consecutive_failures = 0;
-            node.last_checked_at = Some(iso_now());
-            node.last_error = None;
-            node.last_success_at = node.last_checked_at.clone();
-            node.state = "Active";
-        }
-    }
-
-    async fn mark_node_inactive(&self, node_index: usize, message: &str) {
-        let mut guard = self.nodes.lock().await;
-        if let Some(node) = guard.get_mut(node_index) {
-            node.consecutive_failures += 1;
-            node.last_checked_at = Some(iso_now());
-            node.last_error = Some(message.to_string());
-            node.state = "Inactive";
-        }
     }
 }
 

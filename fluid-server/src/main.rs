@@ -1,5 +1,6 @@
 mod config;
 mod error;
+mod horizon;
 mod state;
 mod stellar;
 mod xdr;
@@ -18,10 +19,11 @@ use axum::{
 };
 use config::load_config;
 use error::AppError;
+use horizon::HorizonNodeStatus;
 use serde::{Deserialize, Serialize};
 use state::{
-    iso_now, utc_day_start_ms, ApiKeyConfig, AppState, HealthFeePayer, HorizonNodeStatus,
-    RateLimitEntry, RateLimitResult, TransactionRecord, API_KEYS,
+    iso_now, utc_day_start_ms, ApiKeyConfig, AppState, HealthFeePayer, RateLimitEntry,
+    RateLimitResult, TransactionRecord, API_KEYS,
 };
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
 use tracing::{error, info};
