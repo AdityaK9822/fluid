@@ -35,6 +35,12 @@ export function Navbar() {
                     >
                         Plugins
                     </Link>
+                    <Link
+                        href="/sdk"
+                        className="hidden text-sm font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline-block"
+                    >
+                        SDKs
+                    </Link>
                     <ThemeToggle />
                 </nav>
             </div>

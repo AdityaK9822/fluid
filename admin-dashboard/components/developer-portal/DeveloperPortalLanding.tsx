@@ -228,6 +228,12 @@ export function DeveloperPortalLanding() {
             >
               Plugin Marketplace
             </Link>
+            <Link
+              href="/sdk"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              SDK Registry
+            </Link>
             <a
               href={github}
               className="text-sm font-medium text-primary hover:underline"
