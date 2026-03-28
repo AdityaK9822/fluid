@@ -1,4 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../signing/native", () => ({
+  nativeSigner: {
+    preflightSoroban: vi.fn(),
+    signPayload: vi.fn(async () => Buffer.alloc(64)),
+    signPayloadFromVault: vi.fn(async () => Buffer.alloc(64)),
+  },
+}));
+
+const redisStore = new Map<string, string>();
+vi.mock("../utils/redis", () => ({
+  default: {
+    get: vi.fn((key: string) => Promise.resolve(redisStore.get(key) ?? null)),
+    set: vi.fn((key: string, value: string) => { redisStore.set(key, value); return Promise.resolve("OK"); }),
+    del: vi.fn((key: string) => { redisStore.delete(key); return Promise.resolve(1); }),
+  },
+}));
+
 import StellarSdk from "@stellar/stellar-sdk";
 import { SignerPool } from "../signing/signerPool";
 import { IncidentMonitor } from "./incidentMonitor";
@@ -62,6 +80,7 @@ describe("IncidentMonitor", () => {
     vi.setSystemTime(new Date("2026-03-27T12:00:00.000Z"));
     trigger.mockClear();
     resolve.mockClear();
+    redisStore.clear();
   });
 
   afterEach(() => {

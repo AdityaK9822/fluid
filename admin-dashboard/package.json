@@ -19,6 +19,7 @@
     "@stellar/stellar-sdk": "^14.6.1",
     "@tanstack/react-table": "^8.21.3",
     "bcryptjs": "^2.4.3",
+    "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
@@ -36,12 +37,14 @@
     "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.5.14",
     "playwright": "^1.58.2",
+    "puppeteer": "^24.40.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

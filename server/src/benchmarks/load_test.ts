@@ -33,8 +33,7 @@ interface BenchmarkResult {
 
 class LoadTester {
   public results: BenchmarkResult[] = [];
-  private secretKey =
-    "SCFPATHARWYMJJXGSBWECWBZRWHDZTQFEANMELJCCMRQG4JNYMFPKUZ2V";
+  private secretKey = process.env.FLUID_FEE_PAYER_SECRET ?? "";
   private testPayload = Buffer.alloc(100, 1);
 
   async runBenchmark (config: BenchmarkConfig): Promise<BenchmarkResult> {

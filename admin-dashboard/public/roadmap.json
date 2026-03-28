@@ -1,0 +1,76 @@
+{
+  "items": [
+    {
+      "id": "batch-fee-bump",
+      "title": "Batch fee-bump endpoint",
+      "description": "Submit multiple signed XDRs in a single API call to reduce round-trips and improve throughput for high-volume apps.",
+      "status": "in-progress",
+      "category": "API",
+      "votes": 142,
+      "createdAt": "2026-01-10T00:00:00Z"
+    },
+    {
+      "id": "webhook-retry-policy",
+      "title": "Configurable webhook retry policy",
+      "description": "Let tenants set custom retry intervals, max attempts, and dead-letter queue destinations for failed webhook deliveries.",
+      "status": "planned",
+      "category": "Webhooks",
+      "votes": 98,
+      "createdAt": "2026-01-15T00:00:00Z"
+    },
+    {
+      "id": "soroban-simulation",
+      "title": "Soroban simulation before fee bump",
+      "description": "Automatically simulate Soroban contract invocations server-side to catch footprint errors before submitting the fee-bump envelope.",
+      "status": "planned",
+      "category": "Soroban",
+      "votes": 87,
+      "createdAt": "2026-01-20T00:00:00Z"
+    },
+    {
+      "id": "multi-network",
+      "title": "Multi-network support (Futurenet / custom)",
+      "description": "Allow a single Fluid deployment to sponsor fees across Testnet, Futurenet, and custom Stellar networks simultaneously.",
+      "status": "planned",
+      "category": "Infrastructure",
+      "votes": 74,
+      "createdAt": "2026-02-01T00:00:00Z"
+    },
+    {
+      "id": "spend-alerts",
+      "title": "Spend threshold alerts",
+      "description": "Email and webhook notifications when a tenant's XLM spend crosses configurable daily or monthly thresholds.",
+      "status": "shipped",
+      "category": "Billing",
+      "votes": 61,
+      "createdAt": "2025-11-05T00:00:00Z"
+    },
+    {
+      "id": "go-sdk-v2",
+      "title": "Go SDK v2 with context propagation",
+      "description": "Rewrite fluid-go with full context.Context support, structured logging hooks, and OpenTelemetry trace propagation.",
+      "status": "planned",
+      "category": "SDK",
+      "votes": 55,
+      "createdAt": "2026-02-10T00:00:00Z"
+    },
+    {
+      "id": "rate-limit-tiers",
+      "title": "Per-tenant rate-limit tiers",
+      "description": "Expose rate-limit configuration in the admin dashboard so operators can grant higher throughput to premium tenants.",
+      "status": "in-progress",
+      "category": "API",
+      "votes": 49,
+      "createdAt": "2026-02-15T00:00:00Z"
+    },
+    {
+      "id": "graphql-api",
+      "title": "GraphQL API for transaction history",
+      "description": "Provide a GraphQL endpoint alongside the REST API so developers can query transaction history with flexible field selection.",
+      "status": "planned",
+      "category": "API",
+      "votes": 38,
+      "createdAt": "2026-03-01T00:00:00Z"
+    }
+  ]
+}

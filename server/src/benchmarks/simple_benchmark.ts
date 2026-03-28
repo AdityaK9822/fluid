@@ -21,8 +21,7 @@ interface BenchmarkResult {
 }
 
 class SimpleBenchmark {
-  private secretKey =
-    "SC6KWQBWRYDU3KMWOZZLFC5FRJEG3FN6HRG6V6OX5GIWTBQ5T35R3JGM";
+  private secretKey = process.env.FLUID_FEE_PAYER_SECRET ?? "";
   private testPayload = Buffer.alloc(100, 1);
 
   async runSingleBenchmark (

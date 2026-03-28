@@ -109,7 +109,7 @@ describe("feeBumpHandler network isolation", () => {
       nextErr = err;
     };
 
-    await feeBumpHandler(req, res, config, next as any);
+    await feeBumpHandler(req, res, next as any, config);
 
     expect(nextErr).toBeTruthy();
     expect(nextErr.statusCode).toBe(400);
@@ -216,7 +216,7 @@ describe("feeBumpHandler network isolation", () => {
       nextErr = err;
     };
 
-    await feeBumpHandler(req, res, config, next as any);
+    await feeBumpHandler(req, res, next as any, config);
 
     expect(nextErr).toBeTruthy();
     expect(nextErr.statusCode).toBe(400);
@@ -278,7 +278,15 @@ describe("feeBumpHandler network isolation", () => {
           release: async () => undefined,
           reservedSequenceNumber: null,
         }),
-        getSnapshot: () => [],
+        getSnapshot: () => [{
+          publicKey: feePayerKeypair.publicKey(),
+          active: true,
+          balance: null,
+          inFlight: 0,
+          totalUses: 0,
+          sequenceNumber: null,
+          status: "active",
+        }],
       } as any,
       baseFee: 100,
       feeMultiplier: 2,
@@ -307,11 +315,18 @@ describe("feeBumpHandler network isolation", () => {
     const res: any = {
       locals: {
         apiKey: {
+          key: "test-key",
           tenantId: "tenant-1",
+          name: "Test Key",
           tier: "pro",
-          apiKey: "test-key",
+          tierName: "Pro",
+          tierId: "tier-pro",
+          txLimit: 1000,
+          rateLimit: 100,
+          priceMonthly: 49,
+          maxRequests: 100,
+          windowMs: 60000,
           dailyQuotaStroops: 1_000_000,
-          perMinuteLimit: 10,
         },
       },
       json: vi.fn(),
@@ -323,7 +338,7 @@ describe("feeBumpHandler network isolation", () => {
       nextErr = err;
     };
 
-    await feeBumpHandler(req, res, config, next as any);
+    await feeBumpHandler(req, res, next as any, config);
 
     // Should not have an error - the transaction should be processed
     expect(nextErr).toBeUndefined();

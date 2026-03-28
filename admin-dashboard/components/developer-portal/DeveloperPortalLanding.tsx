@@ -59,7 +59,11 @@ export function DeveloperPortalLanding() {
               id="hero-heading"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.06, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              transition={{
+                delay: 0.06,
+                duration: 0.45,
+                ease: [0.22, 1, 0.36, 1],
+              }}
               className="text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl"
             >
               Ship gasless Stellar experiences at scale
@@ -67,20 +71,32 @@ export function DeveloperPortalLanding() {
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.12, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              transition={{
+                delay: 0.12,
+                duration: 0.45,
+                ease: [0.22, 1, 0.36, 1],
+              }}
               className="mt-6 text-lg text-muted-foreground sm:text-xl"
             >
-              Fluid sponsors network fees so your users never hold XLM for gas. Sign
-              locally, bump fees on the server, and go live on testnet or mainnet with
-              the same SDK.
+              Fluid sponsors network fees so your users never hold XLM for gas.
+              Sign locally, bump fees on the server, and go live on testnet or
+              mainnet with the same SDK.
             </motion.p>
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.18, duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+              transition={{
+                delay: 0.18,
+                duration: 0.45,
+                ease: [0.22, 1, 0.36, 1],
+              }}
               className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
             >
-              <Button size="lg" className="min-w-[200px] text-base shadow-lg" asChild>
+              <Button
+                size="lg"
+                className="min-w-[200px] text-base shadow-lg"
+                asChild
+              >
                 <Link href="/login">Get API Key</Link>
               </Button>
               <Button size="lg" variant="outline" asChild>
@@ -105,11 +121,15 @@ export function DeveloperPortalLanding() {
           transition={{ duration: 0.5 }}
           className="mx-auto max-w-2xl text-center"
         >
-          <h2 id="features-heading" className="text-3xl font-bold tracking-tight sm:text-4xl">
+          <h2
+            id="features-heading"
+            className="text-3xl font-bold tracking-tight sm:text-4xl"
+          >
             Built for real-world Stellar apps
           </h2>
           <p className="mt-4 text-muted-foreground">
-            Everything you need to abstract fees while keeping users in control of their keys.
+            Everything you need to abstract fees while keeping users in control
+            of their keys.
           </p>
         </motion.div>
 
@@ -166,12 +186,15 @@ export function DeveloperPortalLanding() {
             transition={{ duration: 0.45 }}
             className="mx-auto max-w-3xl text-center"
           >
-            <h2 id="sdk-heading" className="text-3xl font-bold tracking-tight sm:text-4xl">
+            <h2
+              id="sdk-heading"
+              className="text-3xl font-bold tracking-tight sm:text-4xl"
+            >
               Integrate in minutes
             </h2>
             <p className="mt-4 text-muted-foreground">
-              The TypeScript SDK talks to your Fluid deployment over HTTPS—drop it into web or
-              Node and start requesting fee bumps.
+              The TypeScript SDK talks to your Fluid deployment over HTTPS—drop
+              it into web or Node and start requesting fee bumps.
             </p>
           </motion.div>
 
@@ -183,7 +206,9 @@ export function DeveloperPortalLanding() {
             className="relative mx-auto mt-10 max-w-4xl overflow-hidden rounded-2xl border border-border bg-zinc-950 shadow-xl dark:bg-zinc-950"
           >
             <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-              <span className="text-xs font-medium text-zinc-400">quickstart.ts</span>
+              <span className="text-xs font-medium text-zinc-400">
+                quickstart.ts
+              </span>
               <button
                 type="button"
                 onClick={copySnippet}
@@ -256,8 +281,17 @@ export function DeveloperPortalLanding() {
             >
               Discord
             </a>
-            <Link href="/forum" className="text-sm font-medium text-primary hover:underline">
+            <Link
+              href="/forum"
+              className="text-sm font-medium text-primary hover:underline"
+            >
               Community Forum
+            </Link>
+            <Link
+              href="/roadmap"
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              Roadmap
             </Link>
           </nav>
         </div>

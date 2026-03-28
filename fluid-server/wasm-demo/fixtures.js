@@ -1,11 +1,10 @@
 export const TEST_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
-export const TEST_SECRET_KEY =
-  "SDMOYUZMPBA5SDXYC7346UPSFC3LA2QSHWI67M7ZW6G2D55TJ2H3A4IE";
+export const TEST_SECRET_KEY = "SDMOYUZMPBA5SDXYC7346UPSFC3LA2QSHWI67M7ZW6G2D55TJ2H3A4IE";
 export const TEST_DESTINATION =
   "GBWO4BS24FQ26NT2ZRYUMQXQ6FYMMZCKRFTO5XDSHPCRZVT336UWOGTW";
 
 export function buildUnsignedTransaction(StellarSdk) {
-  const sourceKeypair = StellarSdk.Keypair.fromSecret(TEST_SECRET_KEY);
+  const sourceKeypair = StellarSdk.Keypair.random();
   const sourceAccount = new StellarSdk.Account(sourceKeypair.publicKey(), "123456789");
 
   return new StellarSdk.TransactionBuilder(sourceAccount, {

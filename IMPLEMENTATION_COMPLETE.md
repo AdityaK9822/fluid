@@ -183,7 +183,7 @@ Create a `.env` file in the `server/` directory:
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/fluid_dev?schema=public
 NODE_ENV=development
 PORT=3000
-FLUID_FEE_PAYER_SECRET=SBIJDGUKMYFX6O2TQOZTQSUKQR3Q22N7GDZ4MKQFZ6L5MGQZWM23VOXT
+FLUID_FEE_PAYER_SECRET=<your-testnet-secret-key>
 STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
 STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 RATE_LIMIT_WINDOW_MS=60000

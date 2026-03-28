@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use stellar_strkey::{ed25519, Strkey};
 use tokio::sync::Mutex;
 
-use crate::{config::Config, error::AppError, horizon::HorizonCluster};
+use crate::{config::Config, error::AppError, horizon::HorizonCluster, metrics::AppMetrics};
 
 #[derive(Clone)]
 pub struct AppState {

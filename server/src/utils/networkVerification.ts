@@ -47,53 +47,61 @@ export function verifyXdrNetwork(
   xdr: string,
   expectedNetworkPassphrase: string
 ): NetworkVerificationResult {
-  // First, try to parse with the expected network passphrase
+  // Parse the XDR — fromXDR accepts any passphrase, using it only for hash computation
+  let tx: ReturnType<typeof StellarSdk.TransactionBuilder.fromXDR>;
   try {
-    StellarSdk.TransactionBuilder.fromXDR(xdr, expectedNetworkPassphrase);
-    // If parsing succeeds, the XDR matches the expected network
-    return {
-      valid: true,
-      xdrNetwork: expectedNetworkPassphrase,
-      expectedNetwork: expectedNetworkPassphrase,
-    };
-  } catch (expectedError: any) {
-    // Check if it's a network mismatch error (TransactionBuilder will throw
-    // an error with a message indicating network mismatch)
-    const errorMessage = expectedError.message || "";
-    
-    // If the error is about network mismatch, try to identify the actual network
-    if (errorMessage.includes("network") || errorMessage.includes("passphrase")) {
-      // Try to identify which network the XDR belongs to
-      for (const [networkName, networkPassphrase] of Object.entries(KNOWN_NETWORKS)) {
-        try {
-          StellarSdk.TransactionBuilder.fromXDR(xdr, networkPassphrase);
-          // Found the matching network
-          const xdrNetwork = networkPassphrase;
-          return {
-            valid: false,
-            xdrNetwork,
-            expectedNetwork: expectedNetworkPassphrase,
-            errorMessage: `Network mismatch: XDR is for ${getNetworkName(xdrNetwork)} but server is configured for ${getNetworkName(expectedNetworkPassphrase)}`,
-          };
-        } catch {
-          // This network doesn't match, try the next one
-          continue;
-        }
-      }
-      
-      // Could not identify the network, but we know it doesn't match
-      return {
-        valid: false,
-        expectedNetwork: expectedNetworkPassphrase,
-        errorMessage: `Network mismatch: XDR was created for a different network than the server's configured network (${getNetworkName(expectedNetworkPassphrase)})`,
-      };
-    }
-    
-    // Some other parsing error (not network-related)
+    tx = StellarSdk.TransactionBuilder.fromXDR(xdr, expectedNetworkPassphrase);
+  } catch (e: any) {
     return {
       valid: false,
       expectedNetwork: expectedNetworkPassphrase,
-      errorMessage: `Invalid XDR: ${errorMessage}`,
+      errorMessage: `Invalid XDR: ${e.message}`,
+    };
+  }
+
+  // If the transaction carries no signatures there is nothing to verify
+  if (!tx.signatures || tx.signatures.length === 0) {
+    return { valid: true, xdrNetwork: expectedNetworkPassphrase, expectedNetwork: expectedNetworkPassphrase };
+  }
+
+  // The network passphrase is folded into the transaction hash, so a signature
+  // created for network A will NOT verify against the hash computed with network B.
+  // Use the source account (which must have signed for the common case) to check.
+  const sourcePublicKey = tx.source;
+  const sig = tx.signatures[0].signature();
+
+  try {
+    const keypair = StellarSdk.Keypair.fromPublicKey(sourcePublicKey);
+
+    // Hash computed with the expected passphrase
+    if (keypair.verify(tx.hash(), sig)) {
+      return { valid: true, xdrNetwork: expectedNetworkPassphrase, expectedNetwork: expectedNetworkPassphrase };
+    }
+
+    // Signature invalid for expected network — identify the actual network
+    for (const [, passphrase] of Object.entries(KNOWN_NETWORKS)) {
+      if (passphrase === expectedNetworkPassphrase) continue;
+      const txOther = StellarSdk.TransactionBuilder.fromXDR(xdr, passphrase);
+      if (keypair.verify(txOther.hash(), sig)) {
+        return {
+          valid: false,
+          xdrNetwork: passphrase,
+          expectedNetwork: expectedNetworkPassphrase,
+          errorMessage: `Network mismatch: XDR is for ${getNetworkName(passphrase)} but server is configured for ${getNetworkName(expectedNetworkPassphrase)}`,
+        };
+      }
+    }
+
+    return {
+      valid: false,
+      expectedNetwork: expectedNetworkPassphrase,
+      errorMessage: `Network mismatch: XDR was created for a different network than the server's configured network (${getNetworkName(expectedNetworkPassphrase)})`,
+    };
+  } catch (e: any) {
+    return {
+      valid: false,
+      expectedNetwork: expectedNetworkPassphrase,
+      errorMessage: `Invalid XDR: ${e.message}`,
     };
   }
 }

@@ -115,7 +115,7 @@ describe("feeBumpHandler", () => {
       nextErr = err;
     };
 
-    await feeBumpHandler(req, res, config, next as any);
+    await feeBumpHandler(req, res, next as any, config);
 
     expect(nextErr).toBeTruthy();
     expect(nextErr.statusCode).toBe(400);

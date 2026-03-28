@@ -11,7 +11,6 @@ describe("networkVerification", () => {
     const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
       fee: "100",
       networkPassphrase,
-      timebounds: { min: 0, max: 9999999999 },
     })
       .addOperation(
         StellarSdk.Operation.payment({
@@ -20,6 +19,7 @@ describe("networkVerification", () => {
           amount: "10",
         })
       )
+      .setTimeout(0)
       .build();
     
     transaction.sign(sourceKeypair);

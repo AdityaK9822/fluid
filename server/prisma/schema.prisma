@@ -7,7 +7,6 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
 }
 
 model SubscriptionTier {
@@ -31,10 +30,11 @@ model Tenant {
   webhookUrl         String?
   webhookSecret      String?
   webhookEventTypes  String?
-  apiKeys            ApiKey[]
-  webhookDeliveries  WebhookDelivery[]
-  quotaTopUps        QuotaTopUp[]
-  payments           Payment[]
+  apiKeys                ApiKey[]
+  webhookDeliveries      WebhookDelivery[]
+  quotaTopUps            QuotaTopUp[]
+  payments               Payment[]
+  sponsoredTransactions  SponsoredTransaction[]
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -42,19 +42,24 @@ model Tenant {
 }
 
 model ApiKey {
-  id                String   @id @default(uuid())
-  key               String   @unique
-  prefix            String
-  name              String   @default("Default API Key")
-  tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  active            Boolean  @default(true)
-  dailyQuotaStroops BigInt   @default(1000000) // 0.1 XLM default
-  maxRequests       Int      @default(5)
-  windowMs          Int      @default(60000)
-  tier              String   @default("free") // free or pro
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                    String    @id @default(uuid())
+  key                   String    @unique
+  prefix                String
+  name                  String    @default("Default API Key")
+  tenantId              String
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  active                Boolean   @default(true)
+  dailyQuotaStroops     BigInt    @default(1000000) // 0.1 XLM default
+  maxRequests           Int       @default(5)
+  windowMs              Int       @default(60000)
+  tier                  String    @default("free") // free or pro
+  isSandbox             Boolean   @default(false)
+  sandboxFeePayerSecret String?
+  sandboxLastResetAt    DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([isSandbox])
 }
 
 model WebhookDelivery {
@@ -142,4 +147,21 @@ model DeviceToken {
   updatedAt DateTime @updatedAt
 
   @@index([token])
+}
+
+// Holds unverified sign-up requests until the developer confirms their email.
+model PendingRegistration {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  projectName   String
+  intendedUse   String
+  token         String   @unique
+  tokenExpiresAt DateTime
+  // pending → verified (token consumed) or expired (TTL elapsed)
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([token])
+  @@index([status])
 }

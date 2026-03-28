@@ -1,6 +1,8 @@
 mod config;
+mod db;
 mod error;
 mod horizon;
+mod metrics;
 mod state;
 mod stellar;
 mod xdr;
@@ -16,13 +18,14 @@ use axum::{
     Json, Router,
 };
 use config::load_config;
+use db::create_pool;
 use error::AppError;
 use horizon::HorizonNodeStatus;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPool;
 use state::{
     iso_now, utc_day_start_ms, ApiKeyConfig, AppState, HealthFeePayer, RateLimitEntry,
-    RateLimitResult, TransactionRecord, API_KEYS,
+    RateLimitResult, SignerPool, TransactionRecord, API_KEYS, REVALIDATION_INTERVAL_SECS,
 };
 use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
@@ -371,7 +374,7 @@ async fn fee_bump(
         .global_limiter
         .check(&format!("ip:{}", addr.ip()))
         .await?;
-    let api_limit = check_api_key_rate_limit(state, &api_key_config).await?;
+    let api_limit = check_api_key_rate_limit(&state, &api_key_config).await?;
 
     let result = process_fee_bump_request(
         &state,
@@ -412,7 +415,7 @@ async fn fee_bump_batch(
         .global_limiter
         .check(&format!("ip:{}", addr.ip()))
         .await?;
-    let api_limit = check_api_key_rate_limit(state, &api_key_config).await?;
+    let api_limit = check_api_key_rate_limit(&state, &api_key_config).await?;
 
     let submit = body.submit.unwrap_or(false);
     let mut results = Vec::with_capacity(body.xdrs.len());

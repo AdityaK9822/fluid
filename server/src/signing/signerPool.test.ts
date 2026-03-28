@@ -1,4 +1,12 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+
+vi.mock("./native", () => ({
+  nativeSigner: {
+    preflightSoroban: vi.fn(),
+    signPayload: vi.fn(async (_secret: string, _payload: Buffer) => Buffer.alloc(64)),
+    signPayloadFromVault: vi.fn(async () => Buffer.alloc(64)),
+  },
+}));
 
 import { SignerPool } from "./signerPool";
 import StellarSdk from "@stellar/stellar-sdk";
