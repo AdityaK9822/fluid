@@ -19,6 +19,11 @@ import {
   listSignersHandler,
   removeSignerHandler,
 } from "./handlers/adminSigners";
+import {
+  deleteDlqHandler,
+  listDlqHandler,
+  replayDlqHandler,
+} from "./handlers/adminDlq";
 import { badgeHandler } from "./handlers/badge";
 import { feeBumpBatchHandler, feeBumpHandler } from "./handlers/feeBump";
 import { createCheckoutSessionHandler, stripeWebhookHandler } from "./handlers/stripe";
@@ -234,6 +239,9 @@ app.delete("/admin/signers/:publicKey", removeSignerHandler(config));
 app.get("/admin/device-tokens", listDeviceTokensHandler);
 app.post("/admin/device-tokens", registerDeviceTokenHandler);
 app.delete("/admin/device-tokens/:id", deleteDeviceTokenHandler);
+app.get("/admin/webhooks/dlq", listDlqHandler);
+app.post("/admin/webhooks/dlq/replay", replayDlqHandler);
+app.post("/admin/webhooks/dlq/delete", deleteDlqHandler);
 
 app.post(
   "/stripe/webhook",
