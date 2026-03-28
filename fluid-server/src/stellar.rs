@@ -11,8 +11,8 @@ use stellar_xdr::curr::{
 };
 use tracing::info;
 
-use crate::xdr;
 use crate::error::AppError;
+use crate::xdr;
 
 pub struct CreatedFeeBumpTransaction {
     pub fee_amount: i64,
