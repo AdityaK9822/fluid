@@ -24,6 +24,12 @@ export default async function AdminWebhooksPage() {
               </p>
             </div>
             <div className="flex items-center gap-4">
+              <Link
+                href="/admin/webhooks/logs"
+                className="inline-flex min-h-10 items-center justify-center rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+              >
+                View Delivery Logs
+              </Link>
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                 <div className="font-medium text-slate-900">
                   {session?.user?.email}

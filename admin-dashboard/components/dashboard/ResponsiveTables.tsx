@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { CopyButton } from "@/components/dashboard/CopyButton";
+import { CategoryBadge } from "@/components/dashboard/CategoryBadge";
 import type { DashboardSigner, DashboardTransaction } from "@/components/dashboard/types";
 
 function formatHash(value: string) {
@@ -112,6 +113,7 @@ export function TransactionsTable({
               <th className="px-5 py-3">Hash</th>
               <th className="px-5 py-3">Status</th>
               <th className="hidden px-5 py-3 md:table-cell">Asset</th>
+              <th className="hidden px-5 py-3 lg:table-cell">Category</th>
               <th className="hidden px-5 py-3 lg:table-cell">Tenant</th>
               <th className="hidden px-5 py-3 xl:table-cell">Date Created</th>
               <th className="px-5 py-3 text-right">Action</th>
@@ -139,6 +141,9 @@ export function TransactionsTable({
                     </td>
                     <td className="hidden px-5 py-4 text-sm text-slate-600 md:table-cell">
                       {transaction.asset}
+                    </td>
+                    <td className="hidden px-5 py-4 text-sm text-slate-600 lg:table-cell">
+                      <CategoryBadge category={transaction.category} />
                     </td>
                     <td className="hidden px-5 py-4 text-sm text-slate-600 lg:table-cell">
                       {transaction.tenantId}
@@ -170,6 +175,14 @@ export function TransactionsTable({
                               Tenant
                             </dt>
                             <dd className="mt-1 text-slate-900">{transaction.tenantId}</dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              Category
+                            </dt>
+                            <dd className="mt-1 text-slate-900">
+                              <CategoryBadge category={transaction.category} />
+                            </dd>
                           </div>
                           <div>
                             <dt className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

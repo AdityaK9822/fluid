@@ -14,6 +14,8 @@ import { priceService } from "../services/priceService";
 import { transactionMilestoneService } from "../services/discordMilestones";
 import { transactionStore } from "../workers/transactionStore";
 import { prisma } from "../utils/db";
+import { classifyTransactionCategory } from "../services/transactionCategorizer";
+import { getFeeManager } from "../services/feeManager";
 
 /**
  * @openapi
@@ -218,10 +220,15 @@ async function processFeeBump(
   }
 
   const operationCount = innerTransaction.operations?.length || 0;
+  const dynamicFeeMultiplier =
+    getFeeManager()?.getMultiplier() ?? config.feeMultiplier;
   const feeAmount = calculateFeeBumpFee(
     innerTransaction, // Pass the transaction object for Soroban check
     config.baseFee,
-    config.feeMultiplier
+    dynamicFeeMultiplier
+  );
+  const category = classifyTransactionCategory(
+    innerTransaction.operations as Array<{ type?: string }>
   );
 
   const quotaCheck = await checkTenantDailyQuota(tenant, feeAmount);
@@ -242,6 +249,7 @@ async function processFeeBump(
       tenantId: tenant.id,
       status: "PENDING",
       costStroops: feeAmount,
+      category,
     },
   });
 
@@ -411,7 +419,13 @@ export async function feeBumpHandler(
 
       // Dynamic fee threshold validation using real-time oracle price
       try {
-        const feeAmount = calculateFeeBumpFee(parsedInner, config.baseFee, config.feeMultiplier);
+        const dynamicFeeMultiplier =
+          getFeeManager()?.getMultiplier() ?? config.feeMultiplier;
+        const feeAmount = calculateFeeBumpFee(
+          parsedInner,
+          config.baseFee,
+          dynamicFeeMultiplier
+        );
         const tokenCode = body.token.split(":")[0].toUpperCase();
         const xlmPriceUsd = await priceService.getTokenPriceUsd("XLM");
         const tokenPriceUsd = await priceService.getTokenPriceUsd(tokenCode);
@@ -503,4 +517,3 @@ export async function feeBumpBatchHandler(
     next(error);
   }
 }
-

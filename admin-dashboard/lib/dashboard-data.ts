@@ -15,11 +15,15 @@ interface HealthApiResponse {
 
 interface TransactionsApiResponse {
   transactions?: Array<{
+    id: string;
     hash: string;
+    txHash?: string | null;
+    innerTxHash?: string;
+    category?: string;
+    costStroops?: number;
     tenantId: string;
     status: "pending" | "submitted" | "success" | "failed";
     createdAt: string;
-    updatedAt: string;
   }>;
 }
 
@@ -65,6 +69,7 @@ const SAMPLE_TRANSACTIONS: DashboardTransaction[] = [
     hash: "8d2f4d3e86d1ce8330d189d579179f7837cf0f20cd5dc27af9f7c59e8da92af1",
     amount: "125.00 USDC",
     asset: "USDC",
+    category: "Token Transfer",
     status: "submitted",
     tenantId: "anchor-west",
     createdAt: "Mar 26, 2026 09:10",
@@ -75,6 +80,7 @@ const SAMPLE_TRANSACTIONS: DashboardTransaction[] = [
     hash: "d7864d77f3bd6407eb6ab9f1f9fd14ca1ce0a1ecf911ce9b0f31d9cc354d0bf7",
     amount: "42.50 XLM",
     asset: "XLM",
+    category: "DEX Swap",
     status: "success",
     tenantId: "mobile-wallet",
     createdAt: "Mar 26, 2026 08:48",
@@ -85,6 +91,7 @@ const SAMPLE_TRANSACTIONS: DashboardTransaction[] = [
     hash: "1dfd3e1a1f2c7d45a8a438b74a90c6fc5a50bf8d28d1f6ce4abcc7a5e83fe366",
     amount: "9,800 AQUA",
     asset: "AQUA",
+    category: "Soroban Contract",
     status: "failed",
     tenantId: "market-maker",
     createdAt: "Mar 26, 2026 07:36",
@@ -120,6 +127,11 @@ function getBaseUrl() {
   return value ? value.replace(/\/$/, "") : null;
 }
 
+function getAdminToken() {
+  const value = process.env.FLUID_ADMIN_TOKEN?.trim();
+  return value && value.length > 0 ? value : null;
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
@@ -134,8 +146,9 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 export async function getDashboardPageData(): Promise<DashboardPageData> {
   const baseUrl = getBaseUrl();
+  const adminToken = getAdminToken();
 
-  if (!baseUrl) {
+  if (!baseUrl || !adminToken) {
     return {
       signers: SAMPLE_SIGNERS,
       transactions: SAMPLE_TRANSACTIONS,
@@ -146,7 +159,16 @@ export async function getDashboardPageData(): Promise<DashboardPageData> {
   try {
     const [health, transactions] = await Promise.all([
       fetchJson<HealthApiResponse>(`${baseUrl}/health`),
-      fetchJson<TransactionsApiResponse>(`${baseUrl}/test/transactions`),
+      fetch(`${baseUrl}/admin/transactions?limit=8`, {
+        cache: "no-store",
+        headers: { "x-admin-token": adminToken },
+      }).then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Request failed with ${response.status}`);
+        }
+
+        return response.json() as Promise<TransactionsApiResponse>;
+      }),
     ]);
 
     return {
@@ -162,14 +184,18 @@ export async function getDashboardPageData(): Promise<DashboardPageData> {
         })) ?? SAMPLE_SIGNERS,
       transactions:
         transactions.transactions?.map((transaction, index) => ({
-          id: `tx-${index + 1}`,
+          id: transaction.id || `tx-${index + 1}`,
           hash: transaction.hash,
-          amount: "Unavailable",
-          asset: "Unknown",
+          amount:
+            typeof transaction.costStroops === "number"
+              ? `${transaction.costStroops.toLocaleString()} stroops`
+              : "Unavailable",
+          asset: "XLM",
+          category: transaction.category ?? "Other",
           status: transaction.status,
           tenantId: transaction.tenantId,
           createdAt: formatDate(transaction.createdAt),
-          updatedAt: formatDate(transaction.updatedAt),
+          updatedAt: formatDate(transaction.createdAt),
         })) ?? SAMPLE_TRANSACTIONS,
       source: "live",
     };

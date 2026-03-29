@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { CopyButton } from "@/components/dashboard/CopyButton";
 import { StatusBadge } from "@/components/dashboard/StatusBadge";
+import { CategoryBadge } from "@/components/dashboard/CategoryBadge";
 import type {
   TransactionHistoryPageData,
   TransactionHistoryRow,
@@ -166,6 +167,11 @@ export function TransactionTable({
       cell: ({ row }) => <StatusBadge status={row.original.status} />,
     },
     {
+      accessorKey: "category",
+      header: "Category",
+      cell: ({ row }) => <CategoryBadge category={row.original.category} />,
+    },
+    {
       accessorKey: "costStroops",
       header: () => <SortLink label="Cost" sortKey="cost" data={data} basePath={basePath} />,
       cell: ({ row }) => (
@@ -216,7 +222,7 @@ export function TransactionTable({
             id="transaction-search"
             name="q"
             defaultValue={data.search}
-            placeholder="Search hash, tenant, or status"
+            placeholder="Search hash, tenant, status, or category"
             className="min-w-0 rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-400"
           />
           <button

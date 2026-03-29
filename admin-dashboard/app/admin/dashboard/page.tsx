@@ -15,6 +15,11 @@ import { SpendChart } from "@/components/dashboard/SpendChart";
 import { QuickstartWizard } from "@/components/dashboard/QuickstartWizard";
 import { getApiKeysPageData } from "@/lib/api-keys-data";
 import { Coins, CheckCircle, Wallet, Zap } from "lucide-react";
+import { ConnectDeviceDialog } from "@/components/dashboard/ConnectDeviceDialog";
+import { fluidAdminToken, fluidServerUrl } from "@/lib/server-env";
+import { getSpendForecastData } from "@/lib/spend-chart-data";
+import { getFeeMultiplierData } from "@/lib/fee-multiplier-data";
+import { FeeEstimatorWidget } from "@/components/dashboard/FeeEstimatorWidget";
 
 export default async function AdminDashboard() {
   const session = await auth();
@@ -22,6 +27,8 @@ export default async function AdminDashboard() {
   const tenantUsage = await getTenantLeaderboard();
   const subscriptionTierData = await getSubscriptionTierPageData();
   const { keys: apiKeys } = await getApiKeysPageData();
+  const spendForecast = await getSpendForecastData();
+  const feeMultiplier = await getFeeMultiplierData();
   const firstActiveKey =
     apiKeys.find((k) => k.active)?.key ?? "your-api-key-here";
 
@@ -90,21 +97,27 @@ export default async function AdminDashboard() {
           />
           <StatCard
             title="Available Balance"
-            value="500,000 XLM"
-            delta="-2% from last week"
+            value={`${spendForecast.currentBalanceXlm.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })} XLM`}
+            delta={spendForecast.runwayMessage}
             icon={Wallet}
           />
           <StatCard
-            title="Current TPS"
-            value="12.5"
-            delta="+8% from last week"
+            title="Dynamic Fee Multiplier"
+            value={`${feeMultiplier.multiplier.toFixed(1)}x`}
+            delta={`${feeMultiplier.congestionLevel} congestion`}
             icon={Zap}
           />
         </section>
 
         {/* Spend Analytics Chart */}
         <section className="mt-6">
-          <SpendChart />
+          <SpendChart forecast={spendForecast} />
+        </section>
+
+        <section className="mt-6">
+          <FeeEstimatorWidget />
         </section>
 
         {/* Tables */}

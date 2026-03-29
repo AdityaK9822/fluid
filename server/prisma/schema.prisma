@@ -191,11 +191,13 @@ model Transaction {
   tenantId    String
   status      String   // PENDING, SUCCESS, FAILED
   costStroops BigInt
+  category    String   @default("Other")
   createdAt   DateTime @default(now())
 
   @@index([tenantId])
   @@index([status])
   @@index([txHash])
+  @@index([category])
 }
 
 // In-dashboard notification centre — persisted alerts for logged-in admins.

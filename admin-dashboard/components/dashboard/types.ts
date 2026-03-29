@@ -9,6 +9,7 @@ export interface DashboardTransaction {
   hash: string;
   amount: string;
   asset: string;
+  category: string;
   status: "pending" | "submitted" | "success" | "failed";
   tenantId: string;
   createdAt: string;
@@ -31,9 +32,30 @@ export interface TransactionHistoryRow {
   id: string;
   timestamp: string;
   innerHash: string;
+  category: string;
   status: TransactionStatus;
   costStroops: number;
   tenant: string;
+}
+
+export interface SpendForecastData {
+  alert: boolean;
+  averageDailySpendXlm: number;
+  currentBalanceXlm: number;
+  historicalBalance: Array<{ date: string; balanceXlm: number }>;
+  projectedBalance: Array<{ date: string; balanceXlm: number }>;
+  runwayDays: number | null;
+  runwayMessage: string;
+  source: "live" | "sample";
+  spendSeries: Array<{ date: string; spendXlm: number }>;
+}
+
+export interface FeeMultiplierData {
+  congestionLevel: "low" | "high";
+  multiplier: number;
+  reason: string;
+  source: "live" | "sample";
+  updatedAt: string;
 }
 
 export interface TenantUsageRow {
